@@ -383,14 +383,18 @@ class Comets extends View {
         this.comets = [];
 
         this.cometStyle = '#fff';
-        this.cometRadius = Random.exponential(2).map((v) => v + 2);
+        this.cometRadius = Random.exponential(2).map((v) => (v + 2) / 1000);
         this.cometRate = 0.05; // comets / second
-        this.cometSpeed = 2000; // pixels / second
+        this.cometSpeed = 2; // screens / second
         this.tailSize = 1.0; // in seconds
         this.tailStyle = `#630`;
         this.cometAngle = Random.uniform(1 * Math.PI / 8, 3 * Math.PI / 8);
         this.cometPosition = Random.normalPairs(0.5, 0.3);
-        this.cometMargin = this.cometSpeed * this.tailSize; // in pixels
+    }
+
+    updateSizes(width, height) {
+        super.updateSizes(width, height);
+        this.diagonal = Math.sqrt(width * width + height * height);
     }
 
     draw(ctx, t, dt, debug) {
@@ -400,9 +404,9 @@ class Comets extends View {
             var vt = this.cometAngle.generate();
             var cost = Math.cos(vt);
             var sint = Math.sin(vt);
-            var radius = this.cometRadius.generate();
-            var vx = cost * this.cometSpeed;
-            var vy = sint * this.cometSpeed;
+            var radius = this.cometRadius.generate() * this.diagonal;
+            var vx = cost * this.cometSpeed * this.diagonal;
+            var vy = sint * this.cometSpeed * this.diagonal;
             // some hullabaloo to be sure that the meteor density
             // along the diagonal is about gaussian
             var startdiag = this.cometPosition.generate();
@@ -429,10 +433,11 @@ class Comets extends View {
         }
 
         // remove any comets off-screen
+        var margin = this.cometSpeed * this.tailSize * this.diagonal;
         this.comets = this.comets.filter(c => {
-            if (c.x < -this.cometMargin || c.x > this.width + this.cometMargin)
+            if (c.x < -margin || c.x > this.width + margin)
                 return false;
-            if (c.y < -this.cometMargin || c.y > this.height + this.cometMargin)
+            if (c.y < -margin || c.y > this.height + margin)
                 return false;
             return true;
         });
