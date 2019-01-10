@@ -243,7 +243,8 @@ class Starfield extends View {
         this.shimmerRate = 10.0; // units of 1/s, leak rate
 
         this.galaxyAngle = 63 * Math.PI / 180;
-        this.galaxyZ = Random.normal(0, 0.05);
+        this.galaxyT = Random.normal(0, Math.PI / 6);
+        this.galaxyZ = Random.normal(0, 0.07);
         this.galaxyProportion = 0.3;
         
         this.shimmerNoise = Random.uniform(-1, 1);
@@ -283,17 +284,17 @@ class Starfield extends View {
 
         // figure out how many stars we need to get this distance
         var numStars = Math.PI * Math.pow(this.starFieldRadius, 2) / Math.pow(this.starDistance, 2);
+        numStars /= (1.0 - this.galaxyProportion);
         if (numStars > this.maxStars)
             numStars = this.maxStars;
 
         // make new stars
         var disc = Random.discPolar(1);
-        var galaxyT = Random.uniform(0, Math.PI);
         this.stars.setUsedStars(Math.round(numStars), () => {
             var pt = disc.generate();
             if (Math.random() < this.galaxyProportion) {
                 // oh no it's a galaxy instead
-                var theta = galaxyT.generate();
+                var theta = this.galaxyT.generate() + Math.PI / 2;
                 var z = this.galaxyZ.generate();
                 var x = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
                 var y = Math.cos(theta);
