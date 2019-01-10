@@ -383,7 +383,7 @@ class Comets extends View {
         this.comets = [];
 
         this.cometStyle = '#fff';
-        this.cometRadius = Random.exponential(2).map((v) => (v + 2) / 1000);
+        this.cometRadius = Random.exponential(2).map((v) => (v + 2) / 1500);
         this.cometRate = 0.05; // comets / second
         this.cometSpeed = 2; // screens / second
         this.tailSize = 1.0; // in seconds
