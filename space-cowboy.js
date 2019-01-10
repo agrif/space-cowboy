@@ -109,10 +109,12 @@ class Canvas extends ElementView {
         this.el.style.left = '0px';
         this.el.style.top = '0px';
         this.backgroundStyle = 'black';
+        this.lightStyle = 'white';
         this.debug = false;
 
         this.properties['debug'] = v => this.debug = v;
         this.properties['background'] = v => this.backgroundStyle = v;
+        this.properties['light'] = v => this.lightStyle = v;
     }
 
     updateSizes(width, height) {
@@ -125,7 +127,10 @@ class Canvas extends ElementView {
 
     draw(ctx, t, dt, debug) {
         // clear
-        ctx.fillStyle = this.backgroundStyle;
+        var grad = ctx.createLinearGradient(0, 0, 0, this.height);
+        grad.addColorStop(0, this.backgroundStyle);
+        grad.addColorStop(1, this.lightStyle);
+        ctx.fillStyle = grad;
         ctx.fillRect(0, 0, this.width, this.height);
         
         // debug shrink and scale
@@ -325,7 +330,7 @@ class Starfield extends View {
             ctx.fill();
         }
         // update shimmer with leaky integrator
-        s.shimmer += dt * this.shimmerRate * (-1.0 * s.shimmer + this.shimmerNoise.generate());
+        s.shimmer -= dt * this.shimmerRate * (s.shimmer - this.shimmerNoise.generate());
         if (s.shimmer > 1.0)
             s.shimmer = 1.0;
         if (s.shimmer < -1.0)
@@ -664,6 +669,7 @@ class SpaceCowboy {
         return this.set({
             debug: false,
             background: '#222',
+            light: '#320',
             foreground: 'foreground.svg',
         });
     }
