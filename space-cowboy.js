@@ -295,8 +295,8 @@ class Starfield extends View {
                 // oh no it's a galaxy instead
                 var theta = galaxyT.generate();
                 var z = this.galaxyZ.generate();
-                var x = Math.cos(theta)
-                var y = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
+                var x = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
+                var y = Math.cos(theta);
                 var t = Math.atan2(y, x);
                 if (t < 0)
                     t += 2 * Math.PI;
