@@ -205,6 +205,8 @@ class StarBucket {
         while (this.usedStars > this.totalStars) {
             var star = starFactory();
             var bucket = this.getBucket(star.r, star.theta);
+            if (!bucket)
+                continue;
             bucket.stars[bucket.stars.length] = star;
             this.totalStars++;
         }
@@ -239,6 +241,10 @@ class Starfield extends View {
         this.horizon = 100; // in pixels, from bottom
         this.north = 0.8; // proportional to width, from left
         this.shimmerRate = 10.0; // units of 1/s, leak rate
+
+        this.galaxyAngle = 63 * Math.PI / 180;
+        this.galaxyZ = Random.normal(0, 0.05);
+        this.galaxyProportion = 0.3;
         
         this.shimmerNoise = Random.uniform(-1, 1);
         this.stars = new StarBucket(this.rBuckets, this.tBuckets);
@@ -282,8 +288,20 @@ class Starfield extends View {
 
         // make new stars
         var disc = Random.discPolar(1);
+        var galaxyT = Random.uniform(0, Math.PI);
         this.stars.setUsedStars(Math.round(numStars), () => {
             var pt = disc.generate();
+            if (Math.random() < this.galaxyProportion) {
+                // oh no it's a galaxy instead
+                var theta = galaxyT.generate();
+                var z = this.galaxyZ.generate();
+                var x = Math.cos(theta)
+                var y = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
+                var t = Math.atan2(y, x);
+                if (t < 0)
+                    t += 2 * Math.PI;
+                pt = [Math.sqrt(x * x + y * y), t];
+            }
             return {
                 x: pt[0] * Math.cos(pt[1]),
                 y: pt[0] * Math.sin(pt[1]),
@@ -359,14 +377,17 @@ class Starfield extends View {
             // render the buckets!
             for (var ir = 0; ir < this.stars.nr; ir++) {
                 var bucket = tbucket.buckets[ir];
+                var visible = true;
                 // ok, do some occlusion testing on the whole bucket
                 if (bucket.rmin > rmax)
+                    visible = false;
+                if (!visible && !debug)
                     break;
                 for (var i = 0; i < bucket.used; i++) {
                     this.drawStar(ctx, dt, bucket.stars[i]);
                 }
 
-                if (debug) {
+                if (debug && visible) {
                     // draw sectors
                     ctx.strokeStyle = 'green';
                     ctx.lineWidth = 5;
