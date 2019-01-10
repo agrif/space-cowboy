@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>See you Space Cowboy...</title>
+    <link rel="stylesheet" type="text/css" href="space-cowboy.css">
+  </head>
+  <body>
+    <div id="container"></div>
+    <script src="space-cowboy.js"></script>
+    <script>
+      var container = document.getElementById('container');
+      var cowboy = new SpaceCowboy(container);
+      if (window.location.hash) {
+        var parts = window.location.hash.substring(1).split(',');
+        for (var i = 0; i < parts.length; i++) {
+          var part = parts[i];
+          if (part === 'debug')
+            cowboy.set({debug: true});
+          else
+            cowboy.loadPreset(part);
+        }
+      }
+      cowboy.start();
+    </script>
+  </body>
+</html>
