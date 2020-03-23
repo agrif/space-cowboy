@@ -109,10 +109,12 @@ class Canvas extends ElementView {
         this.el.style.left = '0px';
         this.el.style.top = '0px';
         this.backgroundStyle = 'black';
+        this.lightStyle = 'white';
         this.debug = false;
 
         this.properties['debug'] = v => this.debug = v;
         this.properties['background'] = v => this.backgroundStyle = v;
+        this.properties['light'] = v => this.lightStyle = v;
     }
 
     updateSizes(width, height) {
@@ -125,7 +127,10 @@ class Canvas extends ElementView {
 
     draw(ctx, t, dt, debug) {
         // clear
-        ctx.fillStyle = this.backgroundStyle;
+        var grad = ctx.createLinearGradient(0, 0, 0, this.height);
+        grad.addColorStop(0, this.backgroundStyle);
+        grad.addColorStop(1, this.lightStyle);
+        ctx.fillStyle = grad;
         ctx.fillRect(0, 0, this.width, this.height);
         
         // debug shrink and scale
@@ -200,6 +205,8 @@ class StarBucket {
         while (this.usedStars > this.totalStars) {
             var star = starFactory();
             var bucket = this.getBucket(star.r, star.theta);
+            if (!bucket)
+                continue;
             bucket.stars[bucket.stars.length] = star;
             this.totalStars++;
         }
@@ -234,6 +241,11 @@ class Starfield extends View {
         this.horizon = 100; // in pixels, from bottom
         this.north = 0.8; // proportional to width, from left
         this.shimmerRate = 10.0; // units of 1/s, leak rate
+
+        this.galaxyAngle = 63 * Math.PI / 180;
+        this.galaxyT = Random.normal(0, Math.PI / 6);
+        this.galaxyZ = Random.normal(0, 0.07);
+        this.galaxyProportion = 0.3;
         
         this.shimmerNoise = Random.uniform(-1, 1);
         this.stars = new StarBucket(this.rBuckets, this.tBuckets);
@@ -272,6 +284,7 @@ class Starfield extends View {
 
         // figure out how many stars we need to get this distance
         var numStars = Math.PI * Math.pow(this.starFieldRadius, 2) / Math.pow(this.starDistance, 2);
+        numStars /= (1.0 - this.galaxyProportion);
         if (numStars > this.maxStars)
             numStars = this.maxStars;
 
@@ -279,6 +292,17 @@ class Starfield extends View {
         var disc = Random.discPolar(1);
         this.stars.setUsedStars(Math.round(numStars), () => {
             var pt = disc.generate();
+            if (Math.random() < this.galaxyProportion) {
+                // oh no it's a galaxy instead
+                var theta = this.galaxyT.generate() + Math.PI / 2;
+                var z = this.galaxyZ.generate();
+                var x = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
+                var y = Math.cos(theta);
+                var t = Math.atan2(y, x);
+                if (t < 0)
+                    t += 2 * Math.PI;
+                pt = [Math.sqrt(x * x + y * y), t];
+            }
             return {
                 x: pt[0] * Math.cos(pt[1]),
                 y: pt[0] * Math.sin(pt[1]),
@@ -325,7 +349,7 @@ class Starfield extends View {
             ctx.fill();
         }
         // update shimmer with leaky integrator
-        s.shimmer += dt * this.shimmerRate * (-1.0 * s.shimmer + this.shimmerNoise.generate());
+        s.shimmer -= dt * this.shimmerRate * (s.shimmer - this.shimmerNoise.generate());
         if (s.shimmer > 1.0)
             s.shimmer = 1.0;
         if (s.shimmer < -1.0)
@@ -354,14 +378,17 @@ class Starfield extends View {
             // render the buckets!
             for (var ir = 0; ir < this.stars.nr; ir++) {
                 var bucket = tbucket.buckets[ir];
+                var visible = true;
                 // ok, do some occlusion testing on the whole bucket
                 if (bucket.rmin > rmax)
+                    visible = false;
+                if (!visible && !debug)
                     break;
                 for (var i = 0; i < bucket.used; i++) {
                     this.drawStar(ctx, dt, bucket.stars[i]);
                 }
 
-                if (debug) {
+                if (debug && visible) {
                     // draw sectors
                     ctx.strokeStyle = 'green';
                     ctx.lineWidth = 5;
@@ -383,14 +410,18 @@ class Comets extends View {
         this.comets = [];
 
         this.cometStyle = '#fff';
-        this.cometRadius = Random.exponential(2).map((v) => v + 2);
+        this.cometRadius = Random.exponential(2).map((v) => (v + 2) / 1500);
         this.cometRate = 0.05; // comets / second
-        this.cometSpeed = 2000; // pixels / second
+        this.cometSpeed = 2; // screens / second
         this.tailSize = 1.0; // in seconds
         this.tailStyle = `#630`;
         this.cometAngle = Random.uniform(1 * Math.PI / 8, 3 * Math.PI / 8);
         this.cometPosition = Random.normalPairs(0.5, 0.3);
-        this.cometMargin = this.cometSpeed * this.tailSize; // in pixels
+    }
+
+    updateSizes(width, height) {
+        super.updateSizes(width, height);
+        this.diagonal = Math.sqrt(width * width + height * height);
     }
 
     draw(ctx, t, dt, debug) {
@@ -400,9 +431,9 @@ class Comets extends View {
             var vt = this.cometAngle.generate();
             var cost = Math.cos(vt);
             var sint = Math.sin(vt);
-            var radius = this.cometRadius.generate();
-            var vx = cost * this.cometSpeed;
-            var vy = sint * this.cometSpeed;
+            var radius = this.cometRadius.generate() * this.diagonal;
+            var vx = cost * this.cometSpeed * this.diagonal;
+            var vy = sint * this.cometSpeed * this.diagonal;
             // some hullabaloo to be sure that the meteor density
             // along the diagonal is about gaussian
             var startdiag = this.cometPosition.generate();
@@ -429,10 +460,11 @@ class Comets extends View {
         }
 
         // remove any comets off-screen
+        var margin = this.cometSpeed * this.tailSize * this.diagonal;
         this.comets = this.comets.filter(c => {
-            if (c.x < -this.cometMargin || c.x > this.width + this.cometMargin)
+            if (c.x < -margin || c.x > this.width + margin)
                 return false;
-            if (c.y < -this.cometMargin || c.y > this.height + this.cometMargin)
+            if (c.y < -margin || c.y > this.height + margin)
                 return false;
             return true;
         });
@@ -650,6 +682,8 @@ class SpaceCowboy {
     loadPreset(name) {
         if (name === 'bebop')
             return this.bebop();
+        if (name === 'blue')
+            return this.blue();
         if (name === 'ttgl')
             return this.ttgl();
         return this;
@@ -659,6 +693,7 @@ class SpaceCowboy {
         return this.set({
             debug: false,
             background: '#222',
+            light: '#320',
             foreground: 'foreground.svg',
         });
     }
@@ -671,6 +706,18 @@ class SpaceCowboy {
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
+        });
+    }
+
+    blue() {
+        return this.defaults().set({
+            byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
+            music: 'blue.mp3',
+            character: 'spike.svg',
+            characterLeft: 0.05,
+            characterWidth: 0.05,
+            characterBottom: 0.12,
+            light: '#005',
         });
     }
 
