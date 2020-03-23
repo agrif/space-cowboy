@@ -682,6 +682,8 @@ class SpaceCowboy {
     loadPreset(name) {
         if (name === 'bebop')
             return this.bebop();
+        if (name === 'blue')
+            return this.blue();
         if (name === 'ttgl')
             return this.ttgl();
         return this;
@@ -700,6 +702,17 @@ class SpaceCowboy {
         return this.defaults().set({
             byline: 'SEE YOU SPACE COWBOY...',
             music: 'space-lion.mp3',
+            character: 'spike.svg',
+            characterLeft: 0.05,
+            characterWidth: 0.05,
+            characterBottom: 0.12,
+        });
+    }
+
+    blue() {
+        return this.defaults().set({
+            byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
+            music: 'blue.mp3',
             character: 'spike.svg',
             characterLeft: 0.05,
             characterWidth: 0.05,
