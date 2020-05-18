@@ -684,6 +684,8 @@ class SpaceCowboy {
             return this.bebop();
         if (name === 'blue')
             return this.blue();
+        if (name === 'standby')
+            return this.standby();
         if (name === 'ttgl')
             return this.ttgl();
         return this;
@@ -713,6 +715,17 @@ class SpaceCowboy {
         return this.defaults().set({
             byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
             music: 'blue.mp3',
+            character: 'spike.svg',
+            characterLeft: 0.05,
+            characterWidth: 0.05,
+            characterBottom: 0.12,
+            light: '#005',
+        });
+    }
+
+    standby() {
+        return this.defaults().set({
+            byline: 'PLEASE STAND BY.',
             character: 'spike.svg',
             characterLeft: 0.05,
             characterWidth: 0.05,
