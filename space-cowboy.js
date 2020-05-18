@@ -730,7 +730,7 @@ class SpaceCowboy {
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
-            light: '#005',
+            music: null,
         });
     }
 
