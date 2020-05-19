@@ -688,6 +688,8 @@ class SpaceCowboy {
             return this.standby();
         if (name === 'ttgl')
             return this.ttgl();
+        if (name === 'exhale')
+            return this.exhale();
         return this;
     }
 
@@ -742,6 +744,19 @@ class SpaceCowboy {
             characterLeft: 0.025,
             characterWidth: 0.10,
             characterBottom: 0.12,
+        });
+    }
+
+    exhale() {
+        return this.defaults().set({
+            byline: 'JUST BREATHE.',
+            music: 'exhale.mp3',
+            character: 'madeline.svg',
+            characterLeft: 0.31,
+            characterWidth: 0.10,
+            characterBottom: 0.085,
+            background: '#2f2443',
+            light: '#f8b8ab',
         });
     }
 }
