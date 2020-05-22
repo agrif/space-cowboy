@@ -548,6 +548,8 @@ class Byline extends ElementView {
         this.el.style.textAlign = 'right';
 
         this.properties['byline'] = v => this.el.innerHTML = v;
+        this.properties['bylineFontStyle'] = v => this.el.style.fontStyle = v;
+        this.properties['bylineFontFamily'] = v => this.el.style.fontFamily = v;
     }
 }
 
@@ -749,7 +751,9 @@ class SpaceCowboy {
 
     exhale() {
         return this.defaults().set({
-            byline: 'JUST BREATHE.',
+            byline: 'Just breathe.',
+            bylineFontFamily: 'Renogare, sans-serif',
+            bylineFontStyle: 'normal',
             music: 'exhale.mp3',
             character: 'madeline.svg',
             characterLeft: 0.31,
