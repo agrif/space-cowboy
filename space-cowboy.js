@@ -78,6 +78,62 @@ class Random {
     }
 }
 
+// helper for making shaders
+class Shader {
+    constructor(ctx, vertlines, fraglines) {
+        var sources = [
+            [ctx.VERTEX_SHADER, vertlines.join("\n")],
+            [ctx.FRAGMENT_SHADER, fraglines.join("\n")]
+        ];
+        var shaders = [];
+        for (var i = 0; i < sources.length; i++) {
+            var s = ctx.createShader(sources[i][0]);
+            ctx.shaderSource(s, sources[i][1]);
+            ctx.compileShader(s);
+            var msg = ctx.getShaderInfoLog(s);
+            if (msg.length > 0)
+                console.log(msg);
+            if (!ctx.getShaderParameter(s, ctx.COMPILE_STATUS))
+                throw "failed to compile shader";
+            shaders.push(s);
+        }
+
+        this.program = ctx.createProgram();
+        for (var i = 0; i < shaders.length; i++) {
+            ctx.attachShader(this.program, shaders[i]);
+        }
+        ctx.linkProgram(this.program);
+        var msg = ctx.getProgramInfoLog(this.program);
+        if (msg.length > 0)
+            console.log(msg);
+        if (!ctx.getProgramParameter(this.program, ctx.LINK_STATUS))
+            throw "failed to link shader";
+
+        this.uniforms = {}
+        this.attributes = {}
+        var nu = ctx.getProgramParameter(this.program, ctx.ACTIVE_UNIFORMS);
+        var na = ctx.getProgramParameter(this.program, ctx.ACTIVE_ATTRIBUTES);
+        for (var i = 0; i < nu; i++) {
+            var info = ctx.getActiveUniform(this.program, i);
+            info.location = ctx.getUniformLocation(this.program, info.name);
+            this.uniforms[info.name] = info;
+            if (!this[info.name])
+                this[info.name] = info.location;
+        }
+        for (var i = 0; i < na; i++) {
+            var info = ctx.getActiveAttrib(this.program, i);
+            info.location = ctx.getAttribLocation(this.program, info.name);
+            this.attributes[info.name] = info;
+            if (!this[info.name])
+                this[info.name] = info.location;
+        }
+    }
+
+    use(ctx) {
+        ctx.useProgram(this.program);
+    }
+}
+
 class View {
     constructor(container) {
         this.container = container;
@@ -86,6 +142,9 @@ class View {
     updateSizes(width, height) {
         this.width = width;
         this.height = height;
+    }
+    updateContext(ctx) {
+        this.ctx = ctx;
     }
     start() {}
     stop() {}
@@ -108,13 +167,19 @@ class Canvas extends ElementView {
         this.el.style.position = 'absolute';
         this.el.style.left = '0px';
         this.el.style.top = '0px';
-        this.backgroundStyle = 'black';
-        this.lightStyle = 'white';
+        this.background = [0.0, 0.0, 0.0];
+        this.light = [1.0, 1.0, 1.0];
         this.debug = false;
 
         this.properties['debug'] = v => this.debug = v;
-        this.properties['background'] = v => this.backgroundStyle = v;
-        this.properties['light'] = v => this.lightStyle = v;
+        this.properties['background'] = v => {
+            this.background = v;
+            this.updateUniforms();
+        };
+        this.properties['light'] = v => {
+            this.light = v;
+            this.updateUniforms();
+        };
     }
 
     updateSizes(width, height) {
@@ -122,16 +187,67 @@ class Canvas extends ElementView {
 
         this.el.width = this.width;
         this.el.height = this.height;
-        this.ctx = this.el.getContext('2d');
+        this.ctx = this.el.getContext('webgl');
+        this.ctx.viewport(0, 0, this.width, this.height);
+    }
+
+    updateContext(ctx) {
+        super.updateContext(ctx);
+
+        this.quadv = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, this.quadv);
+        ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([
+            -1.0, 1.0, 0.0,
+            -1.0, -1.0, 0.0,
+            1.0, -1.0, 0.0,
+            1.0, 1.0, 0.0
+        ]), ctx.STATIC_DRAW);
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, null);
+
+        this.quadi = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, this.quadi);
+        ctx.bufferData(ctx.ELEMENT_ARRAY_BUFFER, new Uint16Array([
+            3, 2, 1, 3, 1, 0
+        ]), ctx.STATIC_DRAW);
+        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, null);
+
+        this.shader = new Shader(ctx, [
+            'attribute vec3 pos;',
+            'varying float f;',
+            'void main(void) {',
+            '  gl_Position = vec4(pos, 1.0);',
+            '  f = (pos.y + 1.0) * 0.5;',
+            '}'
+        ], [
+            'precision mediump float;',
+            'varying float f;',
+            'uniform vec3 background;',
+            'uniform vec3 light;',
+            'void main(void) {',
+            '  vec3 c = background * f + light * (1.0 - f);',
+            '  gl_FragColor = vec4(c, 1.0);',
+            '}'
+        ]);
+
+        this.updateUniforms();
+    }
+
+    updateUniforms() {
+        if (this.shader) {
+            this.shader.use(this.ctx);
+            this.ctx.uniform3fv(this.shader.background, this.background);
+            this.ctx.uniform3fv(this.shader.light, this.light);
+        }
     }
 
     draw(ctx, t, dt, debug) {
-        // clear
-        var grad = ctx.createLinearGradient(0, 0, 0, this.height);
-        grad.addColorStop(0, this.backgroundStyle);
-        grad.addColorStop(1, this.lightStyle);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, this.width, this.height);
+        // clear with gradient
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, this.quadv);
+        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, this.quadi);
+        this.shader.use(ctx);
+        ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT, false, 0, 0);
+        ctx.enableVertexAttribArray(this.shader.pos);
+        ctx.drawElements(ctx.TRIANGLES, 6, ctx.UNSIGNED_SHORT, 0);
         
         // debug shrink and scale
         if (debug) {
@@ -358,6 +474,7 @@ class Starfield extends View {
     }
 
     draw(ctx, t, dt, debug) {
+        return;
         // figure out how much the stars have rotated since last frame
         var theta = -t * this.omega;
         var thetasin = Math.sin(theta);
@@ -425,6 +542,7 @@ class Comets extends View {
     }
 
     draw(ctx, t, dt, debug) {
+        return;
         // generate any comets we need
         var numComets = Random.poisson(this.cometRate * dt).generate();
         for (var i = 0; i < numComets; i++) {
@@ -605,6 +723,7 @@ class SpaceCowboy {
         this.resizeListener = event => this.updateSizes();
         window.addEventListener('resize', this.resizeListener);
         this.updateSizes();
+        this.updateContext();
 
         for (var i = 0; i < this.views.length; i++)
             this.views[i].start();
@@ -631,6 +750,11 @@ class SpaceCowboy {
             this.views[i].updateSizes(this.width, this.height);        
     }
 
+    updateContext() {
+        for (var i = 0; i < this.views.length; i++)
+            this.views[i].updateContext(this.canvas.ctx);
+    }
+
     draw(t) {
         if (!this.running)
             return;
@@ -645,7 +769,6 @@ class SpaceCowboy {
         var debug = this.canvas.debug;
 
         // draw all
-        ctx.save();
         for (var i = 0; i < this.views.length; i++)
             this.views[i].draw(ctx, ts, dt, debug);
 
@@ -655,8 +778,6 @@ class SpaceCowboy {
             ctx.lineWidth = 5;
             ctx.strokeRect(0, 0, this.width, this.height);
         }
-
-        ctx.restore();
 
         // reschedule
         this.lastFrame = t;
@@ -696,8 +817,8 @@ class SpaceCowboy {
     defaults() {
         return this.set({
             debug: false,
-            background: '#222',
-            light: '#320',
+            background: [0.125, 0.125, 0.125],
+            light: [0.1875, 0.125, 0.0],
             foreground: 'foreground.svg',
         });
     }
@@ -716,37 +837,24 @@ class SpaceCowboy {
     }
 
     blue() {
-        return this.defaults().set({
+        return this.bebop().set({
             byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
-            bylineFontFamily: 'Bookman, serif',
-            bylineFontStyle: 'italic',
             music: 'blue.mp3',
-            character: 'spike.svg',
-            characterLeft: 0.05,
-            characterWidth: 0.05,
-            characterBottom: 0.12,
-            light: '#005',
+            light: [0.0, 0.0, 0.3125],
         });
     }
 
     standby() {
-        return this.defaults().set({
+        return this.bebop().set({
             byline: 'PLEASE STAND BY.',
-            bylineFontFamily: 'Bookman, serif',
-            bylineFontStyle: 'italic',
             character: 'spike.svg',
-            characterLeft: 0.05,
-            characterWidth: 0.05,
-            characterBottom: 0.12,
             music: null,
         });
     }
 
     ttgl() {
-        return this.defaults().set({
+        return this.bebop().set({
             byline: 'HMM...',
-            bylineFontFamily: 'Bookman, serif',
-            bylineFontStyle: 'italic',
             music: 'libera-me-from-hell.mp3',
             character: 'kamina.svg',
             characterLeft: 0.025,
@@ -765,8 +873,8 @@ class SpaceCowboy {
             characterLeft: 0.31,
             characterWidth: 0.10,
             characterBottom: 0.085,
-            background: '#2f2443',
-            light: '#f8b8ab',
+            background: [0.184, 0.141, 0.262],
+            light: [0.969, 0.719, 0.668],
         });
     }
 }
