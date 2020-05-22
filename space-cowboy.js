@@ -540,8 +540,6 @@ class Byline extends ElementView {
         this.el.style.right = '0px';
         this.el.style.bottom = '0px';
         this.el.style.color = '#ddd';
-        this.el.style.fontFamily = 'Bookman, serif';
-        this.el.style.fontStyle = 'italic';
         this.el.style.padding = '4pt';
         this.el.style.fontSize = '16pt';
         this.el.style.color = 'white';
@@ -707,6 +705,8 @@ class SpaceCowboy {
     bebop() {
         return this.defaults().set({
             byline: 'SEE YOU SPACE COWBOY...',
+            bylineFontFamily: 'Bookman, serif',
+            bylineFontStyle: 'italic',
             music: 'space-lion.mp3',
             character: 'spike.svg',
             characterLeft: 0.05,
@@ -718,6 +718,8 @@ class SpaceCowboy {
     blue() {
         return this.defaults().set({
             byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
+            bylineFontFamily: 'Bookman, serif',
+            bylineFontStyle: 'italic',
             music: 'blue.mp3',
             character: 'spike.svg',
             characterLeft: 0.05,
@@ -730,6 +732,8 @@ class SpaceCowboy {
     standby() {
         return this.defaults().set({
             byline: 'PLEASE STAND BY.',
+            bylineFontFamily: 'Bookman, serif',
+            bylineFontStyle: 'italic',
             character: 'spike.svg',
             characterLeft: 0.05,
             characterWidth: 0.05,
@@ -741,6 +745,8 @@ class SpaceCowboy {
     ttgl() {
         return this.defaults().set({
             byline: 'HMM...',
+            bylineFontFamily: 'Bookman, serif',
+            bylineFontStyle: 'italic',
             music: 'libera-me-from-hell.mp3',
             character: 'kamina.svg',
             characterLeft: 0.025,
