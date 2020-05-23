@@ -1,5 +1,7 @@
 'use strict';
 
+var DEBUG_SCALE = 0.3;
+
 // lots of useful distributions!
 class Random {
     constructor(fn) {
@@ -225,23 +227,18 @@ class Canvas extends ElementView {
         var quadv = ctx.createBuffer();
         ctx.bindBuffer(ctx.ARRAY_BUFFER, quadv);
         ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([
-            -1.0, 1.0, 0.0,
-            -1.0, -1.0, 0.0,
+            1.0, 1.0, 0.0,
             1.0, -1.0, 0.0,
-            1.0, 1.0, 0.0
-        ]), ctx.STATIC_DRAW);
-
-        var quadi = ctx.createBuffer();
-        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, quadi);
-        ctx.bufferData(ctx.ELEMENT_ARRAY_BUFFER, new Uint16Array([
-            3, 2, 1, 3, 1, 0
+            -1.0, -1.0, 0.0,
+            -1.0, 1.0, 0.0
         ]), ctx.STATIC_DRAW);
 
         this.shader = new Shader(ctx, [
             'attribute vec3 pos;',
             'varying float f;',
+            'uniform float debugscale;',
             'void main(void) {',
-            '  gl_Position = vec4(pos, 1.0);',
+            '  gl_Position = vec4(pos * debugscale, 1.0);',
             '  f = (pos.y + 1.0) * 0.5;',
             '}'
         ], [
@@ -274,14 +271,9 @@ class Canvas extends ElementView {
         // clear with gradient
         ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
+        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         ctx.blendFunc(ctx.ONE, ctx.ZERO);
-        ctx.drawElements(ctx.TRIANGLES, 6, ctx.UNSIGNED_SHORT, 0);
-        
-        // debug shrink and scale
-        if (debug) {
-            ctx.translate(0.4 * this.width, 0.4 * this.height);
-            ctx.scale(0.2, 0.2);
-        }
+        ctx.drawArrays(ctx.TRIANGLE_FAN, 0, 4);
     }
 }
 
@@ -545,6 +537,7 @@ class Starfield extends View {
             'uniform float shimmerRate;',
             'uniform vec2 offset;',
             'uniform vec2 viewport;',
+            'uniform float debugscale;',
             'varying vec3 pointColor;',
             'varying float shimmerOut;',
             // https://gist.github.com/patriciogonzalezvivo/670c22f3966e662d2f83
@@ -563,6 +556,7 @@ class Starfield extends View {
             '  p.x /= viewport.x;',
             '  p.y /= viewport.y;',
             '  p = 2.0 * p - vec2(1.0, 1.0);',
+            '  p *= debugscale;',
             '  pointColor = color;',
             '  pointColor *= 1.0 - 0.5 * (shimmer + 1.0) * shimmerAmount;',
             '  gl_Position = vec4(p.x, -p.y, 0.0, 1.0);',
@@ -624,6 +618,7 @@ class Starfield extends View {
         this.shader.use(ctx);
         ctx.uniform2f(this.shader.theta, thetacos, thetasin);
         ctx.uniform1f(this.shader.dt, dt);
+        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
         for (var it = 0; it < this.stars.nt; it++) {
             var tbucket = this.stars.buckets[it];
@@ -640,7 +635,7 @@ class Starfield extends View {
                 // ok, do some occlusion testing on the whole bucket
                 if (bucket.rmin > rmax)
                     visible = false;
-                if (!visible && !debug)
+                if (!visible)// && !debug)
                     break;
 
                 // draw the bucket
@@ -664,13 +659,13 @@ class Starfield extends View {
 
                 if (debug && visible) {
                     // draw sectors
-                    ctx.strokeStyle = 'green';
-                    ctx.lineWidth = 5;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, bucket.rmin * this.starFieldRadius, bucket.tmin, bucket.tmax, false);
-                    ctx.arc(0, 0, bucket.rmax * this.starFieldRadius, bucket.tmax, bucket.tmin, true);
-                    ctx.closePath();
-                    ctx.stroke();
+                    // ctx.strokeStyle = 'green';
+                    // ctx.lineWidth = 5;
+                    // ctx.beginPath();
+                    // ctx.arc(0, 0, bucket.rmin * this.starFieldRadius, bucket.tmin, bucket.tmax, false);
+                    // ctx.arc(0, 0, bucket.rmax * this.starFieldRadius, bucket.tmax, bucket.tmin, true);
+                    // ctx.closePath();
+                    // ctx.stroke();
                 }
             }
         }
@@ -682,12 +677,13 @@ class Comets extends View {
         super(container);
         this.comets = [];
 
-        this.cometStyle = '#fff';
+        this.cometColor = [1.0, 1.0, 1.0];
+        this.cometVertices = 10;
         this.cometRadius = Random.exponential(2).map((v) => (v + 2) / 1500);
         this.cometRate = 0.05; // comets / second
         this.cometSpeed = 2; // screens / second
         this.tailSize = 1.0; // in seconds
-        this.tailStyle = `#630`;
+        this.tailColor = [0.375, 0.1875, 0.0];
         this.cometAngle = Random.uniform(1 * Math.PI / 8, 3 * Math.PI / 8);
         this.cometPosition = Random.normalPairs(0.5, 0.3);
     }
@@ -695,10 +691,82 @@ class Comets extends View {
     updateSizes(width, height) {
         super.updateSizes(width, height);
         this.diagonal = Math.sqrt(width * width + height * height);
+        this.updateUniforms();
+    }
+
+    updateContext(ctx) {
+        super.updateContext(ctx);
+
+        this.array = ctx.createVertexArray();
+        ctx.bindVertexArray(this.array);
+
+        var cometvs = [-1.0, 0.0, 1.0];
+        this.nvertices = 1 + this.cometVertices;
+        for (var i = 0; i < this.cometVertices; i++) {
+            var p = i / (this.cometVertices - 1.0);
+            var theta = -Math.PI / 2.0 + Math.PI * p;
+            cometvs.push(Math.cos(theta));
+            cometvs.push(Math.sin(theta));
+            cometvs.push(0.0);
+        }
+
+        var vs = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, vs);
+        ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(cometvs),
+                       ctx.STATIC_DRAW);
+
+        this.shader = new Shader(ctx, [
+            'attribute vec2 pos;',
+            'attribute float tail;',
+            'varying vec4 c;',
+            'uniform float debugscale;',
+            'uniform vec2 viewport;',
+            'uniform vec2 cometPos;',
+            'uniform float radius;',
+            'uniform vec2 theta;',
+            'uniform float tailSize;',
+            'uniform vec3 color;',
+            'uniform vec3 tailColor;',
+            'void main(void) {',
+            '  vec2 p;',
+            '  p.x = theta.x * pos.x - theta.y * pos.y;',
+            '  p.y = theta.y * pos.x + theta.x * pos.y;',
+            '  p *= tail * tailSize + (1.0 - tail) * radius;',
+            '  p += cometPos;',
+            '  p.x /= viewport.x;',
+            '  p.y /= viewport.y;',
+            '  p = 2.0 * p - vec2(1.0, 1.0);',
+            '  p.y *= -1.0;',
+            '  c = vec4(tail * tailColor + (1.0 - tail) * color, 1.0);',
+            '  gl_Position = vec4(p * debugscale, 0.0, 1.0);',
+            '}'
+        ], [
+            'precision mediump float;',
+            'varying vec4 c;',
+            'void main(void) {',
+            '  gl_FragColor = c;',
+            '}'
+        ]);
+
+        ctx.vertexAttribPointer(this.shader.pos, 2, ctx.FLOAT,
+                                false, 4 * 3, 4 * 0);
+        ctx.vertexAttribPointer(this.shader.tail, 1, ctx.FLOAT,
+                                false, 4 * 3, 4 * 2);
+        ctx.enableVertexAttribArray(this.shader.pos);
+        ctx.enableVertexAttribArray(this.shader.tail);
+        ctx.bindVertexArray(null);
+
+        this.updateUniforms();
+    }
+
+    updateUniforms() {
+        if (this.shader) {
+            this.shader.use(this.ctx);
+            this.ctx.uniform2f(this.shader.viewport, this.width, this.height);
+        }
     }
 
     draw(ctx, t, dt, debug) {
-        return;
         // generate any comets we need
         var numComets = Random.poisson(this.cometRate * dt).generate();
         for (var i = 0; i < numComets; i++) {
@@ -706,8 +774,9 @@ class Comets extends View {
             var cost = Math.cos(vt);
             var sint = Math.sin(vt);
             var radius = this.cometRadius.generate() * this.diagonal;
-            var vx = cost * this.cometSpeed * this.diagonal;
-            var vy = sint * this.cometSpeed * this.diagonal;
+            var v = this.cometSpeed * this.diagonal;
+            var vx = cost * v;
+            var vy = sint * v;
             // some hullabaloo to be sure that the meteor density
             // along the diagonal is about gaussian
             var startdiag = this.cometPosition.generate();
@@ -726,10 +795,12 @@ class Comets extends View {
                 radius: radius,
                 vx: vx,
                 vy: vy,
-                px: sint * radius,
-                py: -cost * radius,
-                style: this.cometStyle,
-                tailStyle: this.tailStyle,
+                v: v,
+                sint: sint,
+                cost: cost,
+                color: this.cometColor,
+                tailColor: this.tailColor,
+                tailSize: v * this.tailSize
             });
         }
 
@@ -744,26 +815,22 @@ class Comets extends View {
         });
 
         // draw comets
+        ctx.bindVertexArray(this.array);
+        ctx.blendFunc(ctx.ONE, ctx.ONE);
+        this.shader.use(ctx);
+        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         for (var i = 0; i < this.comets.length; i++) {
             var c = this.comets[i];
-            // comet tail
-            var tailx = c.x - c.vx * this.tailSize;
-            var taily = c.y - c.vy * this.tailSize;
-            var grad = ctx.createLinearGradient(c.x, c.y, tailx, taily);
-            grad.addColorStop(0, c.style);
-            grad.addColorStop(1, c.tailStyle);
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.moveTo(tailx, taily);
-            ctx.lineTo(c.x - c.px, c.y - c.py);
-            ctx.lineTo(c.x + c.px, c.y + c.py);
-            ctx.closePath();
-            ctx.fill();
-            // comet head
-            ctx.fillStyle = c.style;
-            ctx.beginPath();
-            ctx.arc(c.x, c.y, c.radius, 0, 2 * Math.PI);
-            ctx.fill();
+
+            ctx.uniform2f(this.shader.cometPos, c.x, c.y);
+            ctx.uniform1f(this.shader.radius, c.radius);
+            ctx.uniform2f(this.shader.theta, c.cost, c.sint);
+            ctx.uniform3fv(this.shader.color, c.color);
+            ctx.uniform3fv(this.shader.tailColor, c.tailColor);
+            ctx.uniform1f(this.shader.tailSize, c.tailSize);
+
+            ctx.drawArrays(ctx.TRIANGLE_FAN, 0, this.nvertices);
+
             // update comet position
             c.x += dt * c.vx;
             c.y += dt * c.vy;
@@ -930,9 +997,9 @@ class SpaceCowboy {
 
         // debug frame
         if (debug) {
-            ctx.strokeStyle = 'red';
-            ctx.lineWidth = 5;
-            ctx.strokeRect(0, 0, this.width, this.height);
+            //ctx.strokeStyle = 'red';
+            //ctx.lineWidth = 5;
+            //ctx.strokeRect(0, 0, this.width, this.height);
         }
 
         // reschedule
@@ -1001,9 +1068,8 @@ class SpaceCowboy {
     }
 
     standby() {
-        return this.bebop().set({
+        return this.set({
             byline: 'PLEASE STAND BY.',
-            character: 'spike.svg',
             music: null,
         });
     }
