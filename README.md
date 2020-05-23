@@ -1,5 +1,5 @@
 Clone of [seeyouspacecowboy.com](http://seeyouspacecowboy.com/) in JS
-with Canvas.
+with WebGL2.
 
 You might need `space-lion.mp3`, `blue.mp3`,
 `libera-me-from-hell.mp3`, and `exhale.mp3`. From places.
