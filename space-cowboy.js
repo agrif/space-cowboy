@@ -65,6 +65,26 @@ class Random {
         return Random.discPolar(radius).map(p => [p[0] * Math.cos(p[1]), p[0] * Math.sin(p[1])]);
     }
 
+    static spherePolar() {
+        return new Random(() => {
+            var theta = 2.0 * Math.PI * Math.random();
+            var phi = Math.asin(1 - 2.0 * Math.random());
+            return [theta, phi];
+        });
+    }
+
+    static sphere(radius) {
+        if (!radius)
+            radius = 1.0;
+        return Random.spherePolar().map(p => {
+            var c = Math.cos(p[1]);
+            var x = c * Math.cos(p[0]);
+            var y = c * Math.sin(p[0]);
+            var z = Math.sin(p[1]);
+            return [x, y, z];
+        });
+    }
+
     static traverse(rngs) {
         return new Random(() => {
             var x = new Array(rngs.length);
@@ -290,14 +310,17 @@ class Starfield extends View {
             Random.uniform(0.0, 1),
         ]).map(v => hsvToRgb(v[0], v[1], v[2]));
         this.shimmerAmount = Random.unit();
-        this.omega = 0.01; // radians / second
-        this.horizon = 100; // in pixels, from bottom
+        this.omega = 0.02; // radians / second
+        this.fov = 90 * Math.PI / 180;
+        this.horizon = 200; // in pixels, from bottom
         this.north = 0.8; // proportional to width, from left
         this.shimmerRate = 10.0; // units of 1/s, leak rate
 
         this.galaxyAngle = 63 * Math.PI / 180;
+        this.galaxySin = Math.sin(this.galaxyAngle);
+        this.galaxyCos = Math.cos(this.galaxyAngle);
         this.galaxyT = Random.normal(0, Math.PI / 6);
-        this.galaxyZ = Random.normal(0, 0.07);
+        this.galaxyP = Random.normal(-0.1, 0.1);
         this.galaxyProportion = 0.3;
         
         this.shimmerNoise = Random.uniform(-1, 1);
@@ -314,45 +337,36 @@ class Starfield extends View {
 
     updateSizes(width, height) {
         super.updateSizes(width, height);
-        this.starFieldRadius = Math.sqrt(Math.max.apply(null, [
-            Math.pow(this.north * width, 2) + Math.pow(this.horizon, 2),
-            Math.pow(this.north * width, 2) + Math.pow(height - this.horizon, 2),
-            Math.pow(width - this.north * width, 2) + Math.pow(height - this.horizon, 2),
-            Math.pow(width - this.north * width, 2) + Math.pow(this.horizon, 2),
-        ]));
-
-        // get the x/y boundaries
-        this.boundaries = {
-            xmin: -this.north * this.width,
-            xmax: (1 - this.north) * this.width,
-            ymin: this.horizon - this.height,
-            ymax: this.horizon,
-        };
+        this.diagonal = Math.sqrt(width * width + height * height);
 
         // figure out how many stars we need to get this distance
-        var numStars = Math.PI * Math.pow(this.starFieldRadius, 2) / Math.pow(this.starDistance, 2);
+        var numStars = width * height / Math.pow(this.starDistance, 2);
+        numStars *= 4.0 * Math.PI / this.fov;
         numStars /= (1.0 - this.galaxyProportion);
         if (numStars > this.maxStars)
             numStars = this.maxStars;
 
         // make new stars
-        var disc = Random.discPolar(1);
+        var sphere = Random.sphere();
         while (this.stars.length < numStars) {
-            var pt = disc.generate();
+            var pt;
             if (Math.random() < this.galaxyProportion) {
                 // oh no it's a galaxy instead
-                var theta = this.galaxyT.generate() + Math.PI / 2;
-                var z = this.galaxyZ.generate();
-                var x = Math.sin(theta) * Math.cos(this.galaxyAngle) - z * Math.sin(this.galaxyAngle);
-                var y = Math.cos(theta);
-                var t = Math.atan2(y, x);
-                if (t < 0)
-                    t += 2 * Math.PI;
-                pt = [Math.sqrt(x * x + y * y), t];
+                var theta = this.galaxyT.generate();
+                var phi = this.galaxyP.generate();
+                var xp = Math.cos(phi) * Math.cos(theta);
+                var y = Math.cos(phi) * Math.sin(theta);
+                var zp = Math.sin(phi);
+                var x = xp * this.galaxyCos - zp * this.galaxySin;
+                var z = xp * this.galaxySin + zp * this.galaxyCos;
+                pt = [x, y, z];
+            } else {
+                pt = sphere.generate();
             }
             this.stars.push({
-                x: pt[0] * Math.cos(pt[1]),
-                y: pt[0] * Math.sin(pt[1]),
+                x: pt[0],
+                y: pt[1],
+                z: pt[2],
                 size: this.starRadius.generate(),
                 color: this.starColor.generate(),
                 shimmerAmount: this.shimmerAmount.generate(),
@@ -369,17 +383,17 @@ class Starfield extends View {
 
         this.shader = new Shader(ctx, [
             'precision mediump float;',
-            'attribute vec2 pos;',
+            'attribute vec3 pos;',
             'attribute vec3 color;',
             'attribute float size;',
             'attribute float shimmerAmount;',
             'attribute float shimmer;',
             'uniform vec2 theta;',
-            'uniform float radius;',
+            'uniform vec2 rotyz;',
+            'uniform vec2 rotxz;',
+            'uniform vec2 fov;',
             'uniform float dt;',
             'uniform float shimmerRate;',
-            'uniform vec2 offset;',
-            'uniform vec2 viewport;',
             'uniform float debugscale;',
             'varying vec3 pointColor;',
             'varying float shimmerOut;',
@@ -388,21 +402,30 @@ class Starfield extends View {
             '  return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);',
             '}',
             'void main(void) {',
-            '  vec2 p;',
-            '  p.x = theta.x * pos.x - theta.y * pos.y;',
-            '  p.y = theta.y * pos.x + theta.x * pos.y;',
+            '  vec3 p_t;',
+            '  p_t.x = theta.x * pos.x - theta.y * pos.y;',
+            '  p_t.y = theta.y * pos.x + theta.x * pos.y;',
+            '  p_t.z = pos.z;',
+            '  vec3 p_yz;',
+            '  p_yz.x = p_t.x;',
+            '  p_yz.y = rotyz.y * p_t.z + rotyz.x * p_t.y;',
+            '  p_yz.z = rotyz.x * p_t.z - rotyz.y * p_t.y;',
+            '  vec3 p_xz;',
+            '  p_xz.x = rotxz.y * p_yz.z + rotxz.x * p_yz.x;',
+            '  p_xz.y = p_yz.y;',
+            '  p_xz.z = rotxz.x * p_yz.z - rotxz.y * p_yz.x;',
+            '  vec4 p = vec4(p_xz.xyz, 1.0);',
             '  shimmerOut = shimmer;',
             '  shimmerOut -= dt * shimmerRate *',
-            '    (shimmer - 2.0 * rand(p) + 1.0);',
-            '  p *= radius;',
-            '  p += offset;',
-            '  p.x /= viewport.x;',
-            '  p.y /= viewport.y;',
-            '  p = 2.0 * p - vec2(1.0, 1.0);',
-            '  p *= debugscale;',
+            '    (shimmer - 2.0 * rand(vec2(p.x, p.y)) + 1.0);',
+            '  p.xy /= p.z;',
+            '  p.x /= fov.x;',
+            '  p.y /= fov.y;',
+            '  p.z -= 1.0;',
+            '  p.xy *= debugscale;',
             '  pointColor = color;',
             '  pointColor *= 1.0 - 0.5 * (shimmer + 1.0) * shimmerAmount;',
-            '  gl_Position = vec4(p.x, -p.y, 0.0, 1.0);',
+            '  gl_Position = p;',
             '  gl_PointSize = size;',
             '}'
         ], [
@@ -443,20 +466,20 @@ class Starfield extends View {
             ctx.bindBuffer(ctx.ARRAY_BUFFER, this.buffer);
             ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
                 this.stars.map(s => [
-                    s.x, s.y,
+                    s.x, s.y, s.z,
                     s.size, s.shimmerAmount,
                     s.color[0], s.color[1], s.color[2]
                 ]).flat()
             ), ctx.DYNAMIC_DRAW);
 
-            ctx.vertexAttribPointer(this.shader.pos, 2, ctx.FLOAT,
-                                    false, 4 * 7, 4 * 0);
+            ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT,
+                                    false, 4 * 8, 4 * 0);
             ctx.vertexAttribPointer(this.shader.size, 1, ctx.FLOAT,
-                                    false, 4 * 7, 4 * 2);
+                                    false, 4 * 8, 4 * 3);
             ctx.vertexAttribPointer(this.shader.shimmerAmount, 1, ctx.FLOAT,
-                                    false, 4 * 7, 4 * 3);
+                                    false, 4 * 8, 4 * 4);
             ctx.vertexAttribPointer(this.shader.color, 3, ctx.FLOAT,
-                                    false, 4 * 7, 4 * 4);
+                                    false, 4 * 8, 4 * 5);
             ctx.enableVertexAttribArray(this.shader.pos);
             ctx.enableVertexAttribArray(this.shader.size);
             ctx.enableVertexAttribArray(this.shader.shimmerAmount);
@@ -481,17 +504,23 @@ class Starfield extends View {
     updateUniforms() {
         if (this.shader) {
             this.shader.use(this.ctx);
-            this.ctx.uniform2f(this.shader.offset,
-                          -this.boundaries.xmin, -this.boundaries.ymin);
-            this.ctx.uniform2f(this.shader.viewport, this.width, this.height);
-            this.ctx.uniform1f(this.shader.radius, this.starFieldRadius);
+            var ld = Math.tan(this.fov / 2.0);
+            var lx = ld * this.width / this.diagonal;
+            var ly = ld * this.height / this.diagonal;
+            this.ctx.uniform2f(this.shader.fov, lx, ly);
             this.ctx.uniform1f(this.shader.shimmerRate, this.shimmerRate);
+            var horizont = Math.atan(ly * (2.0 * this.horizon / this.height - 1.0));
+            this.ctx.uniform2f(this.shader.rotyz,
+                               Math.cos(horizont), Math.sin(horizont));
+            var northt = Math.atan(lx * (2.0 * this.north - 1.0));
+            this.ctx.uniform2f(this.shader.rotxz,
+                               Math.cos(northt), Math.sin(northt));
         }
     }
 
     draw(ctx, t, dt, debug) {
         // figure out how much the stars have rotated since last frame
-        var theta = -t * this.omega;
+        var theta = t * this.omega;
         var thetasin = Math.sin(theta);
         var thetacos = Math.cos(theta);
 
