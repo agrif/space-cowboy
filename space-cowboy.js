@@ -277,159 +277,12 @@ class Canvas extends ElementView {
     }
 }
 
-class StarBucket {
-    constructor(nr, nt) {
-        this.totalStars = 0;
-        this.usedStars = 0;
-        this.nr = nr;
-        this.nt = nt;
-        this.buckets = [];
-        var rinterval = 1.0 / nr;
-        var tinterval = 2.0 * Math.PI / nt;
-        for (var it = 0; it < nt; it++) {
-            var tmin = tinterval * it;
-            var tmax = tinterval * (it + 1);
-            var cosmin = Math.cos(tmin);
-            var sinmin = Math.sin(tmin);
-            var cosmax = Math.cos(tmax);
-            var sinmax = Math.sin(tmax);
-            var tbuckets = [];
-            for (var ir = 0; ir < nr; ir++) {
-                var rmin = Math.sqrt(rinterval * ir);
-                var rmax = Math.sqrt(rinterval * (ir + 1));
-                tbuckets[ir] = {
-                    rmin: rmin,
-                    rmax: rmax,
-                    tmin: tmin,
-                    tmax: tmax,
-                    cosmin: cosmin,
-                    sinmin: sinmin,
-                    cosmax: cosmax,
-                    sinmax: sinmax,
-                    used: 0,
-                    buffer: null,
-                    shimmerBufferIn: null,
-                    shimmerBufferOut: null,
-                    bufferLength: 0,
-                    array: null,
-                    transform: null,
-                    stars: [],
-                };
-            }
-            this.buckets[it] = {
-                tmin: tmin,
-                tmax: tmax,
-                cosmin: cosmin,
-                sinmin: sinmin,
-                cosmax: cosmax,
-                sinmax: sinmax,
-                buckets: tbuckets,
-            };
-        }
-    }
-
-    getBucket(r, theta) {
-        for (var it = 0; it < this.nt; it++) {
-            var tbucket = this.buckets[it];
-            if (theta < tbucket.tmin || theta > tbucket.tmax)
-                continue;
-            for (var ir = 0; ir < this.nr; ir++) {
-                var bucket = tbucket.buckets[ir];
-                if (r < bucket.rmin || r > bucket.rmax)
-                    continue;
-                return bucket;
-            }
-        }
-    }
-
-    setUsedStars(n, starFactory) {
-        this.usedStars = n;
-        while (this.usedStars > this.totalStars) {
-            var star = starFactory();
-            var bucket = this.getBucket(star.r, star.theta);
-            if (!bucket)
-                continue;
-            bucket.stars[bucket.stars.length] = star;
-            this.totalStars++;
-        }
-
-        var usedPercent = this.usedStars / this.totalStars;
-
-        for (var it = 0; it < this.nt; it++) {
-            for (var ir = 0; ir < this.nr; ir++) {
-                var bucket = this.buckets[it].buckets[ir];
-                bucket.used = Math.round(bucket.stars.length * usedPercent);
-            }
-        }
-    }
-
-    updateArrays(ctx, shader) {
-        for (var it = 0; it < this.nt; it++) {
-            for (var ir = 0; ir < this.nr; ir++) {
-                var bucket = this.buckets[it].buckets[ir];
-                if (bucket.buffer && bucket.stars.length <= bucket.bufferLength)
-                    continue;
-
-                if (!bucket.buffer) {
-                    bucket.array = ctx.createVertexArray();
-                    bucket.shimmerBufferIn = ctx.createBuffer();
-                    bucket.shimmerBufferOut = ctx.createBuffer();
-                    bucket.buffer = ctx.createBuffer();
-                    bucket.transform = ctx.createTransformFeedback();
-                }
-
-                ctx.bindVertexArray(bucket.array);
-                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
-                                          bucket.transform);
-
-                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.buffer);
-                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
-                    bucket.stars.map(s => [
-                        s.x, s.y,
-                        s.size, s.shimmerAmount,
-                        s.color[0], s.color[1], s.color[2]
-                    ]).flat()
-                ), ctx.DYNAMIC_DRAW);
-
-                ctx.vertexAttribPointer(shader.pos, 2, ctx.FLOAT,
-                                        false, 4 * 7, 4 * 0);
-                ctx.vertexAttribPointer(shader.size, 1, ctx.FLOAT,
-                                        false, 4 * 7, 4 * 2);
-                ctx.vertexAttribPointer(shader.shimmerAmount, 1, ctx.FLOAT,
-                                        false, 4 * 7, 4 * 3);
-                ctx.vertexAttribPointer(shader.color, 3, ctx.FLOAT,
-                                        false, 4 * 7, 4 * 4);
-                ctx.enableVertexAttribArray(shader.pos);
-                ctx.enableVertexAttribArray(shader.size);
-                ctx.enableVertexAttribArray(shader.shimmerAmount);
-                ctx.enableVertexAttribArray(shader.color);
-
-                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferIn);
-                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
-                    bucket.stars.map(s => 0.0)
-                ), ctx.DYNAMIC_DRAW);
-                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferOut);
-                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
-                    bucket.stars.map(s => 0.0)
-                ), ctx.DYNAMIC_DRAW);
-                ctx.enableVertexAttribArray(shader.shimmer);
-
-                ctx.bindVertexArray(null);
-                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK, null);
-                bucket.bufferLength = bucket.stars.length;
-            }
-        }
-    }
-}
-
 class Starfield extends View {
     constructor(container) {
         super(container);
         
         this.starDistance = 20;
         this.maxStars = 20000 * 100;
-        this.rBuckets = 10;
-        this.tBuckets = 20;
         this.starRadius = Random.uniform(2, 5);
         this.starColor = Random.traverse([
             Random.uniform(0, 0.65),
@@ -448,7 +301,15 @@ class Starfield extends View {
         this.galaxyProportion = 0.3;
         
         this.shimmerNoise = Random.uniform(-1, 1);
-        this.stars = new StarBucket(this.rBuckets, this.tBuckets);
+
+        this.stars = [];
+        this.used = 0;
+        this.buffer = null;
+        this.shimmerBufferIn = null;
+        this.shimmerBufferOut = null;
+        this.bufferLength = 0;
+        this.array = null;
+        this.transform = null;
     }
 
     updateSizes(width, height) {
@@ -468,20 +329,6 @@ class Starfield extends View {
             ymax: this.horizon,
         };
 
-        // figure out corner thetas
-        var corners = [['xmin', 'ymin'], ['xmin', 'ymax'], ['xmax', 'ymax'], ['xmax', 'ymin']];
-        this.boundaries.corners = [];
-        for (var i = 0; i < corners.length; i++) {
-            var c = corners[i];
-            var x = this.boundaries[c[0]];
-            var y = this.boundaries[c[1]];
-            var r = Math.sqrt(x * x + y * y);
-            var theta = Math.atan2(y, x);
-            if (theta < 0)
-                theta += 2 * Math.PI;
-            this.boundaries.corners[i] = [r, theta];
-        }
-
         // figure out how many stars we need to get this distance
         var numStars = Math.PI * Math.pow(this.starFieldRadius, 2) / Math.pow(this.starDistance, 2);
         numStars /= (1.0 - this.galaxyProportion);
@@ -490,7 +337,7 @@ class Starfield extends View {
 
         // make new stars
         var disc = Random.discPolar(1);
-        this.stars.setUsedStars(Math.round(numStars), () => {
+        while (this.stars.length < numStars) {
             var pt = disc.generate();
             if (Math.random() < this.galaxyProportion) {
                 // oh no it's a galaxy instead
@@ -503,22 +350,18 @@ class Starfield extends View {
                     t += 2 * Math.PI;
                 pt = [Math.sqrt(x * x + y * y), t];
             }
-            return {
+            this.stars.push({
                 x: pt[0] * Math.cos(pt[1]),
                 y: pt[0] * Math.sin(pt[1]),
-                r: pt[0],
-                theta: pt[1],
                 size: this.starRadius.generate(),
                 color: this.starColor.generate(),
-                shimmer: 0,
                 shimmerAmount: this.shimmerAmount.generate(),
-            };
-        });
-
-        if (this.ctx) {
-            this.stars.updateArrays(this.ctx, this.shader);
-            this.updateUniforms();
+            });
         }
+
+        this.used = numStars;
+        this.updateArrays();
+        this.updateUniforms();
     }
 
     updateContext(ctx) {
@@ -574,8 +417,65 @@ class Starfield extends View {
             '}'
         ], ['shimmerOut']);
 
-        this.stars.updateArrays(ctx, this.shader);
+        this.updateArrays();
         this.updateUniforms();
+    }
+
+    updateArrays() {
+        if (this.shader) {
+            if (this.buffer && this.stars.length <= this.bufferLength)
+                return;
+
+            var ctx = this.ctx;
+
+            if (!this.buffer) {
+                this.array = ctx.createVertexArray();
+                this.shimmerBufferIn = ctx.createBuffer();
+                this.shimmerBufferOut = ctx.createBuffer();
+                this.buffer = ctx.createBuffer();
+                this.transform = ctx.createTransformFeedback();
+            }
+
+            ctx.bindVertexArray(this.array);
+            ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
+                                      this.transform);
+
+            ctx.bindBuffer(ctx.ARRAY_BUFFER, this.buffer);
+            ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                this.stars.map(s => [
+                    s.x, s.y,
+                    s.size, s.shimmerAmount,
+                    s.color[0], s.color[1], s.color[2]
+                ]).flat()
+            ), ctx.DYNAMIC_DRAW);
+
+            ctx.vertexAttribPointer(this.shader.pos, 2, ctx.FLOAT,
+                                    false, 4 * 7, 4 * 0);
+            ctx.vertexAttribPointer(this.shader.size, 1, ctx.FLOAT,
+                                    false, 4 * 7, 4 * 2);
+            ctx.vertexAttribPointer(this.shader.shimmerAmount, 1, ctx.FLOAT,
+                                    false, 4 * 7, 4 * 3);
+            ctx.vertexAttribPointer(this.shader.color, 3, ctx.FLOAT,
+                                    false, 4 * 7, 4 * 4);
+            ctx.enableVertexAttribArray(this.shader.pos);
+            ctx.enableVertexAttribArray(this.shader.size);
+            ctx.enableVertexAttribArray(this.shader.shimmerAmount);
+            ctx.enableVertexAttribArray(this.shader.color);
+
+            ctx.bindBuffer(ctx.ARRAY_BUFFER, this.shimmerBufferIn);
+            ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                this.stars.map(s => 0.0)
+            ), ctx.DYNAMIC_DRAW);
+            ctx.bindBuffer(ctx.ARRAY_BUFFER, this.shimmerBufferOut);
+            ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                this.stars.map(s => 0.0)
+            ), ctx.DYNAMIC_DRAW);
+            ctx.enableVertexAttribArray(this.shader.shimmer);
+
+            ctx.bindVertexArray(null);
+            ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK, null);
+            this.bufferLength = this.stars.length;
+        }
     }
 
     updateUniforms() {
@@ -589,23 +489,6 @@ class Starfield extends View {
         }
     }
 
-    castTheta(tmin, tmax, cosmin, sinmin, cosmax, sinmax) {
-        var bounds = this.boundaries;
-        var rxmin = Math.max(bounds.xmin / cosmin, bounds.xmax / cosmin);
-        var rymin = Math.max(bounds.ymin / sinmin, bounds.ymax / sinmin);
-        var rxmax = Math.max(bounds.xmin / cosmax, bounds.xmax / cosmax);
-        var rymax = Math.max(bounds.ymin / sinmax, bounds.ymax / sinmax);
-        var r = Math.max(Math.min(rxmin, rymin), Math.min(rxmax, rymax));
-        // corners are tricksy
-        for (var i = 0; i < bounds.corners.length; i++) {
-            var c = bounds.corners[i];
-            var dt = (c[1] - tmin + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
-            if (dt > 0 && dt < tmax - tmin && c[0] > r)
-                r = c[0];
-        }
-        return r;
-    }
-
     draw(ctx, t, dt, debug) {
         // figure out how much the stars have rotated since last frame
         var theta = -t * this.omega;
@@ -613,62 +496,29 @@ class Starfield extends View {
         var thetacos = Math.cos(theta);
 
         // draw stars
-        //ctx.translate(-this.boundaries.xmin, -this.boundaries.ymin);
-        //ctx.rotate(theta);
         this.shader.use(ctx);
         ctx.uniform2f(this.shader.theta, thetacos, thetasin);
         ctx.uniform1f(this.shader.dt, dt);
         ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
-        for (var it = 0; it < this.stars.nt; it++) {
-            var tbucket = this.stars.buckets[it];
-            // precalculate some occlusion fun stuff
-            var cosmin = thetacos * tbucket.cosmin - thetasin * tbucket.sinmin;
-            var sinmin = thetasin * tbucket.cosmin + thetacos * tbucket.sinmin;
-            var cosmax = thetacos * tbucket.cosmax - thetasin * tbucket.sinmax;
-            var sinmax = thetasin * tbucket.cosmax + thetacos * tbucket.sinmax;
-            var rmax = this.castTheta(tbucket.tmin + theta, tbucket.tmax + theta, cosmin, sinmin, cosmax, sinmax) / this.starFieldRadius;
-            // render the buckets!
-            for (var ir = 0; ir < this.stars.nr; ir++) {
-                var bucket = tbucket.buckets[ir];
-                var visible = true;
-                // ok, do some occlusion testing on the whole bucket
-                if (bucket.rmin > rmax)
-                    visible = false;
-                if (!visible)// && !debug)
-                    break;
 
-                // draw the bucket
-                ctx.bindVertexArray(bucket.array);
-                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
-                                          bucket.transform);
-                ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0,
-                                   bucket.shimmerBufferOut);
-                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferIn);
-                ctx.vertexAttribPointer(this.shader.shimmer, 1, ctx.FLOAT,
-                                        false, 0.0, 0.0);
-                ctx.beginTransformFeedback(ctx.POINTS);
-                ctx.drawArrays(ctx.POINTS, 0, bucket.used);
-                ctx.endTransformFeedback();
-                ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0, null);
-                ctx.bindBuffer(ctx.ARRAY_BUFFER, null);
+        ctx.bindVertexArray(this.array);
+        ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
+                                  this.transform);
+        ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0,
+                           this.shimmerBufferOut);
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, this.shimmerBufferIn);
+        ctx.vertexAttribPointer(this.shader.shimmer, 1, ctx.FLOAT,
+                                false, 0.0, 0.0);
+        ctx.beginTransformFeedback(ctx.POINTS);
+        ctx.drawArrays(ctx.POINTS, 0, this.used);
+        ctx.endTransformFeedback();
+        ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, null);
 
-                var tmp = bucket.shimmerBufferOut;
-                bucket.shimmerBufferOut = bucket.shimmerBufferIn;
-                bucket.shimmerBufferIn = tmp;
-
-                if (debug && visible) {
-                    // draw sectors
-                    // ctx.strokeStyle = 'green';
-                    // ctx.lineWidth = 5;
-                    // ctx.beginPath();
-                    // ctx.arc(0, 0, bucket.rmin * this.starFieldRadius, bucket.tmin, bucket.tmax, false);
-                    // ctx.arc(0, 0, bucket.rmax * this.starFieldRadius, bucket.tmax, bucket.tmin, true);
-                    // ctx.closePath();
-                    // ctx.stroke();
-                }
-            }
-        }
+        var tmp = this.shimmerBufferOut;
+        this.shimmerBufferOut = this.shimmerBufferIn;
+        this.shimmerBufferIn = tmp;
     }
 }
 
