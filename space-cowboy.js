@@ -78,9 +78,28 @@ class Random {
     }
 }
 
+// color conversion
+function hsvToRgb(h, s, v) {
+    var r, g, b, i, f, p, q, t;
+    i = Math.floor(h * 6);
+    f = h * 6 - i;
+    p = v * (1 - s);
+    q = v * (1 - f * s);
+    t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+    case 0: r = v, g = t, b = p; break;
+    case 1: r = q, g = v, b = p; break;
+    case 2: r = p, g = v, b = t; break;
+    case 3: r = p, g = q, b = v; break;
+    case 4: r = t, g = p, b = v; break;
+    case 5: r = v, g = p, b = q; break;
+    }
+    return [r, g, b];
+}
+
 // helper for making shaders
 class Shader {
-    constructor(ctx, vertlines, fraglines) {
+    constructor(ctx, vertlines, fraglines, transformRecord) {
         var sources = [
             [ctx.VERTEX_SHADER, vertlines.join("\n")],
             [ctx.FRAGMENT_SHADER, fraglines.join("\n")]
@@ -101,6 +120,10 @@ class Shader {
         this.program = ctx.createProgram();
         for (var i = 0; i < shaders.length; i++) {
             ctx.attachShader(this.program, shaders[i]);
+        }
+        if (transformRecord) {
+            ctx.transformFeedbackVaryings(this.program, transformRecord,
+                                          ctx.SEPARATE_ATTRIBS);
         }
         ctx.linkProgram(this.program);
         var msg = ctx.getProgramInfoLog(this.program);
@@ -187,29 +210,32 @@ class Canvas extends ElementView {
 
         this.el.width = this.width;
         this.el.height = this.height;
-        this.ctx = this.el.getContext('webgl');
+        this.ctx = this.el.getContext('webgl2');
         this.ctx.viewport(0, 0, this.width, this.height);
     }
 
     updateContext(ctx) {
         super.updateContext(ctx);
 
-        this.quadv = ctx.createBuffer();
-        ctx.bindBuffer(ctx.ARRAY_BUFFER, this.quadv);
+        ctx.enable(ctx.BLEND);
+
+        this.quad = ctx.createVertexArray();
+        ctx.bindVertexArray(this.quad);
+
+        var quadv = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, quadv);
         ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([
             -1.0, 1.0, 0.0,
             -1.0, -1.0, 0.0,
             1.0, -1.0, 0.0,
             1.0, 1.0, 0.0
         ]), ctx.STATIC_DRAW);
-        ctx.bindBuffer(ctx.ARRAY_BUFFER, null);
 
-        this.quadi = ctx.createBuffer();
-        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, this.quadi);
+        var quadi = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, quadi);
         ctx.bufferData(ctx.ELEMENT_ARRAY_BUFFER, new Uint16Array([
             3, 2, 1, 3, 1, 0
         ]), ctx.STATIC_DRAW);
-        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, null);
 
         this.shader = new Shader(ctx, [
             'attribute vec3 pos;',
@@ -229,6 +255,10 @@ class Canvas extends ElementView {
             '}'
         ]);
 
+        ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT, false, 0, 0);
+        ctx.enableVertexAttribArray(this.shader.pos);
+        ctx.bindVertexArray(null);
+
         this.updateUniforms();
     }
 
@@ -242,11 +272,9 @@ class Canvas extends ElementView {
 
     draw(ctx, t, dt, debug) {
         // clear with gradient
-        ctx.bindBuffer(ctx.ARRAY_BUFFER, this.quadv);
-        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, this.quadi);
+        ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
-        ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT, false, 0, 0);
-        ctx.enableVertexAttribArray(this.shader.pos);
+        ctx.blendFunc(ctx.ONE, ctx.ZERO);
         ctx.drawElements(ctx.TRIANGLES, 6, ctx.UNSIGNED_SHORT, 0);
         
         // debug shrink and scale
@@ -287,6 +315,12 @@ class StarBucket {
                     cosmax: cosmax,
                     sinmax: sinmax,
                     used: 0,
+                    buffer: null,
+                    shimmerBufferIn: null,
+                    shimmerBufferOut: null,
+                    bufferLength: 0,
+                    array: null,
+                    transform: null,
                     stars: [],
                 };
             }
@@ -336,6 +370,64 @@ class StarBucket {
             }
         }
     }
+
+    updateArrays(ctx, shader) {
+        for (var it = 0; it < this.nt; it++) {
+            for (var ir = 0; ir < this.nr; ir++) {
+                var bucket = this.buckets[it].buckets[ir];
+                if (bucket.buffer && bucket.stars.length <= bucket.bufferLength)
+                    continue;
+
+                if (!bucket.buffer) {
+                    bucket.array = ctx.createVertexArray();
+                    bucket.shimmerBufferIn = ctx.createBuffer();
+                    bucket.shimmerBufferOut = ctx.createBuffer();
+                    bucket.buffer = ctx.createBuffer();
+                    bucket.transform = ctx.createTransformFeedback();
+                }
+
+                ctx.bindVertexArray(bucket.array);
+                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
+                                          bucket.transform);
+
+                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.buffer);
+                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                    bucket.stars.map(s => [
+                        s.x, s.y,
+                        s.size, s.shimmerAmount,
+                        s.color[0], s.color[1], s.color[2]
+                    ]).flat()
+                ), ctx.DYNAMIC_DRAW);
+
+                ctx.vertexAttribPointer(shader.pos, 2, ctx.FLOAT,
+                                        false, 4 * 7, 4 * 0);
+                ctx.vertexAttribPointer(shader.size, 1, ctx.FLOAT,
+                                        false, 4 * 7, 4 * 2);
+                ctx.vertexAttribPointer(shader.shimmerAmount, 1, ctx.FLOAT,
+                                        false, 4 * 7, 4 * 3);
+                ctx.vertexAttribPointer(shader.color, 3, ctx.FLOAT,
+                                        false, 4 * 7, 4 * 4);
+                ctx.enableVertexAttribArray(shader.pos);
+                ctx.enableVertexAttribArray(shader.size);
+                ctx.enableVertexAttribArray(shader.shimmerAmount);
+                ctx.enableVertexAttribArray(shader.color);
+
+                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferIn);
+                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                    bucket.stars.map(s => 0.0)
+                ), ctx.DYNAMIC_DRAW);
+                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferOut);
+                ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+                    bucket.stars.map(s => 0.0)
+                ), ctx.DYNAMIC_DRAW);
+                ctx.enableVertexAttribArray(shader.shimmer);
+
+                ctx.bindVertexArray(null);
+                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK, null);
+                bucket.bufferLength = bucket.stars.length;
+            }
+        }
+    }
 }
 
 class Starfield extends View {
@@ -343,15 +435,15 @@ class Starfield extends View {
         super(container);
         
         this.starDistance = 20;
-        this.maxStars = 20000;
+        this.maxStars = 20000 * 100;
         this.rBuckets = 10;
         this.tBuckets = 20;
-        this.starRadius = Random.uniform(0.001, 0.003);
-        this.starStyle = Random.traverse([
-            Random.uniform(0, 65),
-            Random.uniform(0, 20),
-            Random.uniform(50, 100),
-        ]).map(v => `hsl(${v[0]}, ${v[1]}%, ${v[2]}%)`);   
+        this.starRadius = Random.uniform(2, 5);
+        this.starColor = Random.traverse([
+            Random.uniform(0, 0.65),
+            Random.uniform(0, 0.2),
+            Random.uniform(0.0, 1),
+        ]).map(v => hsvToRgb(v[0], v[1], v[2]));
         this.shimmerAmount = Random.unit();
         this.omega = 0.01; // radians / second
         this.horizon = 100; // in pixels, from bottom
@@ -425,11 +517,82 @@ class Starfield extends View {
                 r: pt[0],
                 theta: pt[1],
                 size: this.starRadius.generate(),
-                style: this.starStyle.generate(),
+                color: this.starColor.generate(),
                 shimmer: 0,
                 shimmerAmount: this.shimmerAmount.generate(),
             };
         });
+
+        if (this.ctx) {
+            this.stars.updateArrays(this.ctx, this.shader);
+            this.updateUniforms();
+        }
+    }
+
+    updateContext(ctx) {
+        super.updateContext(ctx);
+
+        this.shader = new Shader(ctx, [
+            'precision mediump float;',
+            'attribute vec2 pos;',
+            'attribute vec3 color;',
+            'attribute float size;',
+            'attribute float shimmerAmount;',
+            'attribute float shimmer;',
+            'uniform vec2 theta;',
+            'uniform float radius;',
+            'uniform float dt;',
+            'uniform float shimmerRate;',
+            'uniform vec2 offset;',
+            'uniform vec2 viewport;',
+            'varying vec3 pointColor;',
+            'varying float shimmerOut;',
+            // https://gist.github.com/patriciogonzalezvivo/670c22f3966e662d2f83
+            'float rand(vec2 n) {',
+            '  return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);',
+            '}',
+            'void main(void) {',
+            '  vec2 p;',
+            '  p.x = theta.x * pos.x - theta.y * pos.y;',
+            '  p.y = theta.y * pos.x + theta.x * pos.y;',
+            '  shimmerOut = shimmer;',
+            '  shimmerOut -= dt * shimmerRate *',
+            '    (shimmer - 2.0 * rand(p) + 1.0);',
+            '  p *= radius;',
+            '  p += offset;',
+            '  p.x /= viewport.x;',
+            '  p.y /= viewport.y;',
+            '  p = 2.0 * p - vec2(1.0, 1.0);',
+            '  pointColor = color;',
+            '  pointColor *= 1.0 - 0.5 * (shimmer + 1.0) * shimmerAmount;',
+            '  gl_Position = vec4(p.x, -p.y, 0.0, 1.0);',
+            '  gl_PointSize = size;',
+            '}'
+        ], [
+            'precision mediump float;',
+            'varying vec3 pointColor;',
+            'void main(void) {',
+            '  vec2 pos = 2.0 * gl_PointCoord - vec2(1.0, 1.0);',
+            '  float inside = 1.0 - dot(pos, pos);',
+            '  inside = (inside - 0.5) * 2.0 + 0.5;',
+            '  inside = clamp(inside, 0.0, 1.0);',
+            '  gl_FragColor = vec4(pointColor * inside, 1.0);',
+            '}'
+        ], ['shimmerOut']);
+
+        this.stars.updateArrays(ctx, this.shader);
+        this.updateUniforms();
+    }
+
+    updateUniforms() {
+        if (this.shader) {
+            this.shader.use(this.ctx);
+            this.ctx.uniform2f(this.shader.offset,
+                          -this.boundaries.xmin, -this.boundaries.ymin);
+            this.ctx.uniform2f(this.shader.viewport, this.width, this.height);
+            this.ctx.uniform1f(this.shader.radius, this.starFieldRadius);
+            this.ctx.uniform1f(this.shader.shimmerRate, this.shimmerRate);
+        }
     }
 
     castTheta(tmin, tmax, cosmin, sinmin, cosmax, sinmax) {
@@ -449,41 +612,19 @@ class Starfield extends View {
         return r;
     }
 
-    drawStar(ctx, dt, s) {
-        var starx = s.x * this.starFieldRadius;
-        var stary = s.y * this.starFieldRadius;
-        ctx.fillStyle = s.style;
-        ctx.globalAlpha = 1.0 - 0.5 * (s.shimmer + 1) * s.shimmerAmount;
-        var size = s.size * this.starFieldRadius;
-        if (size < 1)
-            size = 1;
-        if (size < 3) {
-            ctx.fillRect(starx, stary, size, size);
-        } else {
-            ctx.beginPath();
-            ctx.arc(starx, stary, size / 2, 0, 2 * Math.PI);
-            ctx.fill();
-        }
-        // update shimmer with leaky integrator
-        s.shimmer -= dt * this.shimmerRate * (s.shimmer - this.shimmerNoise.generate());
-        if (s.shimmer > 1.0)
-            s.shimmer = 1.0;
-        if (s.shimmer < -1.0)
-            s.shimmer = -1.0;
-
-    }
-
     draw(ctx, t, dt, debug) {
-        return;
         // figure out how much the stars have rotated since last frame
         var theta = -t * this.omega;
         var thetasin = Math.sin(theta);
         var thetacos = Math.cos(theta);
 
         // draw stars
-        ctx.save();
-        ctx.translate(-this.boundaries.xmin, -this.boundaries.ymin);
-        ctx.rotate(theta);
+        //ctx.translate(-this.boundaries.xmin, -this.boundaries.ymin);
+        //ctx.rotate(theta);
+        this.shader.use(ctx);
+        ctx.uniform2f(this.shader.theta, thetacos, thetasin);
+        ctx.uniform1f(this.shader.dt, dt);
+        ctx.blendFunc(ctx.ONE, ctx.ONE);
         for (var it = 0; it < this.stars.nt; it++) {
             var tbucket = this.stars.buckets[it];
             // precalculate some occlusion fun stuff
@@ -501,9 +642,25 @@ class Starfield extends View {
                     visible = false;
                 if (!visible && !debug)
                     break;
-                for (var i = 0; i < bucket.used; i++) {
-                    this.drawStar(ctx, dt, bucket.stars[i]);
-                }
+
+                // draw the bucket
+                ctx.bindVertexArray(bucket.array);
+                ctx.bindTransformFeedback(ctx.TRANSFORM_FEEDBACK,
+                                          bucket.transform);
+                ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0,
+                                   bucket.shimmerBufferOut);
+                ctx.bindBuffer(ctx.ARRAY_BUFFER, bucket.shimmerBufferIn);
+                ctx.vertexAttribPointer(this.shader.shimmer, 1, ctx.FLOAT,
+                                        false, 0.0, 0.0);
+                ctx.beginTransformFeedback(ctx.POINTS);
+                ctx.drawArrays(ctx.POINTS, 0, bucket.used);
+                ctx.endTransformFeedback();
+                ctx.bindBufferBase(ctx.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+                ctx.bindBuffer(ctx.ARRAY_BUFFER, null);
+
+                var tmp = bucket.shimmerBufferOut;
+                bucket.shimmerBufferOut = bucket.shimmerBufferIn;
+                bucket.shimmerBufferIn = tmp;
 
                 if (debug && visible) {
                     // draw sectors
@@ -517,7 +674,6 @@ class Starfield extends View {
                 }
             }
         }
-        ctx.restore();
     }
 }
 
