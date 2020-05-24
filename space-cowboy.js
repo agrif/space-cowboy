@@ -884,8 +884,19 @@ class Planet extends View {
         this.radius = 1737.1;
         this.fudge = 5; // turns out moons are VERY SMALL
         this.direction = [1.0, 1.0, 0.8];
-        this.lightdir = [-4.0, -1.0, 0.0];
+        this.lightdir = [2.0, 0.0, -4.0];
         this.roughness = 0.5;
+        this.textureUrl = 'moon.jpg';
+
+        this.properties['moonSize'] = v => {
+            this.fudge = v;
+            this.updateUniforms();
+        };
+
+        this.properties['moonTexture'] = v => {
+            this.textureUrl = v;
+            this.loadTexture();
+        };
 
         this.generate();
     }
@@ -942,6 +953,16 @@ class Planet extends View {
     updateContext(ctx) {
         super.updateContext(ctx);
 
+        this.tex = ctx.createTexture();
+        ctx.bindTexture(ctx.TEXTURE_2D, this.tex);
+        // placeholder
+        ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, 1, 1, 0,
+                       ctx.RGBA, ctx.UNSIGNED_BYTE,
+                       new Uint8Array([255, 255, 255, 255]));
+        ctx.bindTexture(ctx.TEXTURE_2D, null);
+
+        this.loadTexture();
+
         this.sphere = ctx.createVertexArray();
         ctx.bindVertexArray(this.sphere);
 
@@ -961,22 +982,27 @@ class Planet extends View {
 
         this.shader = new Shader(ctx, [
             'attribute vec3 pos;',
+            'attribute vec2 texcoord;',
             'varying vec3 normal;',
             'varying vec3 eye;',
+            'varying vec2 tc;',
             'uniform mat4 viewMatrix;',
             'uniform mat4 modelMatrix;',
             'void main(void) {',
-            '  normal = pos;',
+            '  tc = texcoord;',
+            '  normal = normalize((modelMatrix * vec4(pos, 0.0)).xyz);',
             '  eye = normalize(-(modelMatrix * vec4(pos, 1.0)).xyz);',
             '  gl_Position = viewMatrix * modelMatrix * vec4(pos, 1.0);',
             '}'
         ], [
             'precision mediump float;',
+            'uniform sampler2D tex;',
             'uniform vec3 lightdir;',
             'uniform float A;',
             'uniform float B;',
             'varying vec3 normal;',
             'varying vec3 eye;',
+            'varying vec2 tc;',
             'void main(void) {',
             '  float cosi = dot(normal, normalize(lightdir));',
             '  float cosr = dot(normal, eye);',
@@ -986,30 +1012,52 @@ class Planet extends View {
             '  float tanb = min(sini / cosi, sinr / cosr);',
             '  float cosir = max(0.0, cosi * cosr + sini * sinr);',
             '  float l = max(0.0, cosi) * (A + B * cosir * sina * tanb);',
-            '  vec3 color = vec3(1.0, 1.0, 1.0);',
+            '  vec3 color = texture2D(tex, tc).rgb;',
             '  gl_FragColor = vec4(color.rgb * l, 1.0);',
             '}'
         ]);
 
         ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT,
                                 false, 4 * 5, 4 * 0);
+        ctx.vertexAttribPointer(this.shader.texcoord, 2, ctx.FLOAT,
+                                false, 4 * 5, 4 * 3);
         ctx.enableVertexAttribArray(this.shader.pos);
+        ctx.enableVertexAttribArray(this.shader.texcoord);
 
         ctx.bindVertexArray(null);
 
         this.updateUniforms();
     }
 
+    loadTexture() {
+        if (this.ctx) {
+            var ctx = this.ctx;
+            var tex = this.tex;
+            var image = new Image();
+            image.onload = function() {
+                ctx.bindTexture(ctx.TEXTURE_2D, tex);
+                ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA,
+                               ctx.RGBA, ctx.UNSIGNED_BYTE, image);
+                ctx.generateMipmap(ctx.TEXTURE_2D);
+                ctx.bindTexture(ctx.TEXTURE_2D, null);
+            };
+
+            image.src = this.textureUrl;
+        }
+    }
+
     updateUniforms() {
         if (this.shader) {
             this.shader.use(this.ctx);
             this.ctx.uniform3fv(this.shader.lightdir, this.lightdir);
+            this.ctx.uniform1i(this.shader.tex, 0);
 
             var d = this.direction;
             var len = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
             d = d.map(v => 2 * v / len);
 
             var pos = new Matrix().scale(2 * this.radius * this.fudge / this.distance)
+                .rotate(Math.PI / 2, 1.0, 0.0) // should be a look-at
                 .translate(d[0], d[1], d[2]);
             this.ctx.uniformMatrix4fv(this.shader.modelMatrix, false,
                                       pos.data);
@@ -1026,6 +1074,8 @@ class Planet extends View {
     draw(ctx, t, dt) {
         ctx.bindVertexArray(this.sphere);
         this.shader.use(ctx);
+        ctx.activeTexture(ctx.TEXTURE0);
+        ctx.bindTexture(ctx.TEXTURE_2D, this.tex);
         ctx.uniformMatrix4fv(this.shader.viewMatrix, false,
                              this.root.viewMatrices.sky.data);
         ctx.blendFunc(ctx.ONE, ctx.ZERO);
@@ -1307,6 +1357,8 @@ class SpaceCowboy {
             bylineFontStyle: 'italic',
             music: 'space-lion.mp3',
             character: 'spike.svg',
+            moonSize: 50,
+            moonTexture: 'jupiter.jpg',
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
@@ -1333,6 +1385,8 @@ class SpaceCowboy {
             byline: 'HMM...',
             music: 'libera-me-from-hell.mp3',
             character: 'kamina.svg',
+            moonSize: 5,
+            moonTexture: 'moon.jpg',
             characterLeft: 0.025,
             characterWidth: 0.10,
             characterBottom: 0.12,
@@ -1346,6 +1400,8 @@ class SpaceCowboy {
             bylineFontStyle: 'normal',
             music: 'exhale.mp3',
             character: 'madeline.svg',
+            moonSize: 5,
+            moonTexture: 'moon.jpg',
             characterLeft: 0.31,
             characterWidth: 0.10,
             characterBottom: 0.085,
