@@ -874,6 +874,169 @@ class Comets extends View {
     }
 }
 
+class Planet extends View {
+    constructor(root) {
+        super(root);
+
+        this.hdiv = 100;
+        this.vdiv = 100;
+        this.distance = 363104; // in same units as radius
+        this.radius = 1737.1;
+        this.fudge = 5; // turns out moons are VERY SMALL
+        this.direction = [1.0, 1.0, 0.8];
+        this.lightdir = [-4.0, -1.0, 0.0];
+        this.roughness = 0.5;
+
+        this.generate();
+    }
+
+    generate() {
+        this.vertices = [];
+        this.indices = [];
+
+        var hstep = 2.0 * Math.PI / this.hdiv;
+        var vstep = Math.PI / this.vdiv;
+
+        // UV sphere vertices
+        for (var i = 0; i <= this.vdiv; i++) {
+            var vangle = 0.5 * Math.PI - i * vstep;
+            var xy = Math.cos(vangle);
+            var z = Math.sin(vangle);
+
+            for (var j = 0; j <= this.hdiv; j++) {
+                var hangle = j * hstep;
+
+                var x = xy * Math.cos(hangle);
+                var y = xy * Math.sin(hangle);
+
+                var s = j / this.hdiv;
+                var t = i / this.vdiv;
+
+                this.vertices.push({
+                    x: x, y: y, z: z,
+                    s: s, t: t,
+                });
+            }
+        }
+
+        // indices
+        for (var i = 0; i < this.vdiv; i++) {
+            var k1 = i * (this.hdiv + 1);
+            var k2 = k1 + this.hdiv + 1;
+
+            for (var j = 0; j < this.hdiv; j++, k1++, k2++) {
+                if (i != 0) {
+                    this.indices.push(k1);
+                    this.indices.push(k2);
+                    this.indices.push(k1 + 1);
+                }
+                if (i != this.vdiv - 1) {
+                    this.indices.push(k1 + 1);
+                    this.indices.push(k2);
+                    this.indices.push(k2 + 1);
+                }
+            }
+        }
+    }
+
+    updateContext(ctx) {
+        super.updateContext(ctx);
+
+        this.sphere = ctx.createVertexArray();
+        ctx.bindVertexArray(this.sphere);
+
+        var spherev = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ARRAY_BUFFER, spherev);
+        ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array(
+            this.vertices.map(v => [
+                v.x, v.y, v.z,
+                v.s, v.t,
+            ]).flat()
+        ), ctx.STATIC_DRAW);
+
+        var spherei = ctx.createBuffer();
+        ctx.bindBuffer(ctx.ELEMENT_ARRAY_BUFFER, spherei);
+        ctx.bufferData(ctx.ELEMENT_ARRAY_BUFFER, new Uint16Array(this.indices),
+                       ctx.STATIC_DRAW);
+
+        this.shader = new Shader(ctx, [
+            'attribute vec3 pos;',
+            'varying vec3 normal;',
+            'varying vec3 eye;',
+            'uniform mat4 viewMatrix;',
+            'uniform mat4 modelMatrix;',
+            'void main(void) {',
+            '  normal = pos;',
+            '  eye = normalize(-(modelMatrix * vec4(pos, 1.0)).xyz);',
+            '  gl_Position = viewMatrix * modelMatrix * vec4(pos, 1.0);',
+            '}'
+        ], [
+            'precision mediump float;',
+            'uniform vec3 lightdir;',
+            'uniform float A;',
+            'uniform float B;',
+            'varying vec3 normal;',
+            'varying vec3 eye;',
+            'void main(void) {',
+            '  float cosi = dot(normal, normalize(lightdir));',
+            '  float cosr = dot(normal, eye);',
+            '  float sini = sqrt(1.0 - cosi * cosi);',
+            '  float sinr = sqrt(1.0 - cosr * cosr);',
+            '  float sina = max(sini, sinr);',
+            '  float tanb = min(sini / cosi, sinr / cosr);',
+            '  float cosir = max(0.0, cosi * cosr + sini * sinr);',
+            '  float l = max(0.0, cosi) * (A + B * cosir * sina * tanb);',
+            '  vec3 color = vec3(1.0, 1.0, 1.0);',
+            '  gl_FragColor = vec4(color.rgb * l, 1.0);',
+            '}'
+        ]);
+
+        ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT,
+                                false, 4 * 5, 4 * 0);
+        ctx.enableVertexAttribArray(this.shader.pos);
+
+        ctx.bindVertexArray(null);
+
+        this.updateUniforms();
+    }
+
+    updateUniforms() {
+        if (this.shader) {
+            this.shader.use(this.ctx);
+            this.ctx.uniform3fv(this.shader.lightdir, this.lightdir);
+
+            var d = this.direction;
+            var len = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            d = d.map(v => 2 * v / len);
+
+            var pos = new Matrix().scale(2 * this.radius * this.fudge / this.distance)
+                .translate(d[0], d[1], d[2]);
+            this.ctx.uniformMatrix4fv(this.shader.modelMatrix, false,
+                                      pos.data);
+
+            // oren-nayar stuff
+            var s = this.roughness * this.roughness;
+            var A = 1.0 - 0.5 * s  / (s + 0.33);
+            var B = 0.45 * s / (s + 0.09);
+            this.ctx.uniform1f(this.shader.A, A);
+            this.ctx.uniform1f(this.shader.B, B);
+        }
+    }
+
+    draw(ctx, t, dt) {
+        ctx.bindVertexArray(this.sphere);
+        this.shader.use(ctx);
+        ctx.uniformMatrix4fv(this.shader.viewMatrix, false,
+                             this.root.viewMatrices.sky.data);
+        ctx.blendFunc(ctx.ONE, ctx.ZERO);
+        ctx.enable(ctx.DEPTH_TEST);
+        ctx.clear(ctx.DEPTH_BUFFER_BIT);
+        ctx.drawElements(ctx.TRIANGLES, this.indices.length,
+                         ctx.UNSIGNED_SHORT, 0);
+        ctx.disable(ctx.DEPTH_TEST);
+    }
+}
+
 class Foreground extends ElementView {
     constructor(root) {
         super(root, 'img');
@@ -987,7 +1150,7 @@ class ViewMatrices extends View {
         var northt = Math.atan(lx * (2.0 * this.north - 1.0));
         this.skyBase = new Matrix().rotate(0, Math.PI, 0)
             .rotate(-horizont, 0, 0).rotate(0, northt, 0)
-            .perspective(this.width / this.height, this.fov, 0.1, 2.0)
+            .perspective(this.width / this.height, this.fov, 0.1, 10.0)
             .scale(debugscale, debugscale, 1.0);
 
         this.viewport = new Matrix().scale(2.0 / width, 2.0 / height, 1.0)
@@ -1019,6 +1182,7 @@ class SpaceCowboy {
 
             // stuff in space
             this.starfield,
+            new Planet(this),
             new Comets(this),
 
             // stuff not in space
