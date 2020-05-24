@@ -375,17 +375,6 @@ class Canvas extends ElementView {
         this.el.style.position = 'absolute';
         this.el.style.left = '0px';
         this.el.style.top = '0px';
-        this.background = [0.0, 0.0, 0.0];
-        this.light = [1.0, 1.0, 1.0];
-
-        this.properties['background'] = v => {
-            this.background = v;
-            this.updateUniforms();
-        };
-        this.properties['light'] = v => {
-            this.light = v;
-            this.updateUniforms();
-        };
     }
 
     updateSizes(width, height) {
@@ -401,6 +390,33 @@ class Canvas extends ElementView {
         super.updateContext(ctx);
 
         ctx.enable(ctx.BLEND);
+        ctx.clearColor(0.0, 0.0, 0.0, 0.0);
+    }
+
+    draw(ctx, t, dt) {
+        ctx.clear(ctx.COLOR_BUFFER_BIT);
+    }
+}
+
+class Light extends View {
+    constructor(root) {
+        super(root);
+
+        this.background = [0.0, 0.0, 0.0];
+        this.light = [1.0, 1.0, 1.0];
+
+        this.properties['background'] = v => {
+            this.background = v;
+            this.updateUniforms();
+        };
+        this.properties['light'] = v => {
+            this.light = v;
+            this.updateUniforms();
+        };
+    }
+
+    updateContext(ctx) {
+        super.updateContext(ctx);
 
         this.quad = ctx.createVertexArray();
         ctx.bindVertexArray(this.quad);
@@ -451,10 +467,10 @@ class Canvas extends ElementView {
     }
 
     draw(ctx, t, dt) {
-        // clear with gradient
+        // draw light gradient
         ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
-        ctx.blendFunc(ctx.ONE, ctx.ZERO);
+        ctx.blendFunc(ctx.ONE, ctx.ONE);
         ctx.drawArrays(ctx.TRIANGLE_FAN, 0, 4);
     }
 }
@@ -1000,8 +1016,13 @@ class SpaceCowboy {
         this.views = [
             this.viewMatrices,
             this.canvas,
+
+            // stuff in space
             this.starfield,
             new Comets(this),
+
+            // stuff not in space
+            new Light(this),
             new Foreground(this),
             new Character(this),
             new Byline(this),
