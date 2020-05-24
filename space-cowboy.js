@@ -300,15 +300,13 @@ class Canvas extends ElementView {
 class Starfield extends View {
     constructor(container) {
         super(container);
-        
+
+        this.generateStars = false;
         this.starDistance = 20;
         this.maxStars = 20000 * 100;
-        this.starRadius = Random.uniform(2, 5);
-        this.starColor = Random.traverse([
-            Random.uniform(0, 0.65),
-            Random.uniform(0, 0.2),
-            Random.uniform(0.0, 1),
-        ]).map(v => hsvToRgb(v[0], v[1], v[2]));
+        this.maxStarRadius = 5;
+        this.minStarRadius = 2;
+        this.referenceMag = 2.0;
         this.shimmerAmount = Random.unit();
         this.omega = 0.02; // radians / second
         this.fov = 90 * Math.PI / 180;
@@ -335,6 +333,33 @@ class Starfield extends View {
         this.transform = null;
     }
 
+    addStars(stars) {
+        for (var i = 0; i < stars.length; i++)
+            this.addStar(stars[i]);
+        if (this.width)
+            this.updateSizes(this.width, this.height);
+    }
+
+    addStar(star) {
+        var brightness = Math.pow(2.512, this.referenceMag - star.mag);
+        if (brightness > 1.0)
+            brightness = 1.0;
+        var radius = Math.sqrt(brightness) * this.maxStarRadius;
+        var factor = 1.0;
+        if (radius < this.minStarRadius) {
+            factor = radius / this.minStarRadius;
+            radius = this.minStarRadius;
+        }
+        this.stars.push({
+            x: star.x,
+            y: star.y,
+            z: star.z,
+            size: radius,
+            color: [factor, factor, factor],
+            shimmerAmount: this.shimmerAmount.generate(),
+        });
+    }
+
     updateSizes(width, height) {
         super.updateSizes(width, height);
         this.diagonal = Math.sqrt(width * width + height * height);
@@ -348,7 +373,7 @@ class Starfield extends View {
 
         // make new stars
         var sphere = Random.sphere();
-        while (this.stars.length < numStars) {
+        while (this.generateStars && this.stars.length < numStars) {
             var pt;
             if (Math.random() < this.galaxyProportion) {
                 // oh no it's a galaxy instead
@@ -363,17 +388,16 @@ class Starfield extends View {
             } else {
                 pt = sphere.generate();
             }
-            this.stars.push({
+            this.addStar({
                 x: pt[0],
                 y: pt[1],
                 z: pt[2],
-                size: this.starRadius.generate(),
-                color: this.starColor.generate(),
-                shimmerAmount: this.shimmerAmount.generate(),
+                mag: this.referenceMag,
+                color: 0.58,
             });
         }
 
-        this.used = numStars;
+        this.used = Math.min(numStars, this.stars.length);
         this.updateArrays();
         this.updateUniforms();
     }
@@ -803,10 +827,12 @@ class SpaceCowboy {
 
         // set up our canvas
         this.canvas = new Canvas(container);
+
+        this.starfield = new Starfield(container);
         
         this.views = [
             this.canvas,
-            new Starfield(container),
+            this.starfield,
             new Comets(container),
             new Foreground(container),
             new Character(container),
@@ -900,6 +926,10 @@ class SpaceCowboy {
             //    throw `Bad setting for SpaceCowboy: ${name}`;
         }
         return this;
+    }
+
+    addStars(stars) {
+        this.starfield.addStars(stars);
     }
 
     loadPreset(name) {
