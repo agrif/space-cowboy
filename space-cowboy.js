@@ -119,6 +119,54 @@ function hsvToRgb(h, s, v) {
     return [r, g, b];
 }
 
+// https://stackoverflow.com/a/41451654
+function bvToRgb(bv) {
+    if (bv < -0.40)
+        bv = -0.40;
+    if (bv > 2.00)
+        bv = 2.00;
+
+    var r = 0.0;
+    var g = 0.0;
+    var b = 0.0;
+
+    if (-0.40 <= bv < 0.00) {
+        var t = (bv + 0.40) / (0.00 + 0.40);
+        r= 0.61 + (0.11 * t) + (0.1 * t * t);
+    } else if (0.00 <= bv < 0.40) {
+        var t = (bv - 0.00) / (0.40 - 0.00);
+        r = 0.83 + (0.17 * t);
+    } else if (0.40 <= bv < 2.10) {
+        var t = (bv - 0.40) / (2.10 - 0.40);
+        r = 1.00;
+    }
+    if (-0.40 <= bv < 0.00) {
+        var t = (bv + 0.40) / (0.00 + 0.40);
+        g = 0.70 + (0.07 * t) + (0.1 * t * t);
+    } else if (0.00 <= bv < 0.40) {
+        var t = (bv - 0.00) / (0.40 - 0.00);
+        g = 0.87 + (0.11 * t);
+    } else if (0.40 <= bv < 1.60) {
+        var t = (bv - 0.40) / (1.60 - 0.40);
+        g = 0.98 - (0.16 * t);
+    } else if (1.60 <= bv < 2.00) {
+        var t = (bv - 1.60) / (2.00 - 1.60);
+        g = 0.82 - (0.5 * t * t);
+    }
+    if (-0.40 <= bv < 0.40) {
+        var t = (bv + 0.40) / (0.40 + 0.40);
+        b = 1.00;
+    } else if (0.40 <= bv < 1.50) {
+        var t = (bv - 0.40) / (1.50 - 0.40);
+        b = 1.00 - (0.47 * t) + (0.1 * t * t);
+    } else if (1.50 <= bv < 1.94) {
+        var t = (bv - 1.50) / (1.94 - 1.50);
+        b = 0.63 - (0.6 * t * t);
+    }
+
+    return [r, g, b];
+}
+
 // helper for making shaders
 class Shader {
     constructor(ctx, vertlines, fraglines, transformRecord) {
@@ -307,6 +355,8 @@ class Starfield extends View {
         this.maxStarRadius = 5;
         this.minStarRadius = 2;
         this.referenceMag = 2.0;
+        this.magnitudes = Random.exponential(1.2).map(v => 6.0 - v);
+        this.colors = Random.normal(0.8, 0.4);
         this.shimmerAmount = Random.unit();
         this.omega = 0.02; // radians / second
         this.fov = 90 * Math.PI / 180;
@@ -350,12 +400,13 @@ class Starfield extends View {
             factor = radius / this.minStarRadius;
             radius = this.minStarRadius;
         }
+        var c = bvToRgb(star.color);
         this.stars.push({
             x: star.x,
             y: star.y,
             z: star.z,
             size: radius,
-            color: [factor, factor, factor],
+            color: [factor * c[0], factor * c[1], factor * c[2]],
             shimmerAmount: this.shimmerAmount.generate(),
         });
     }
@@ -392,8 +443,8 @@ class Starfield extends View {
                 x: pt[0],
                 y: pt[1],
                 z: pt[2],
-                mag: this.referenceMag,
-                color: 0.58,
+                mag: this.magnitudes.generate(),
+                color: this.colors.generate(),
             });
         }
 
