@@ -1,7 +1,5 @@
 'use strict';
 
-var DEBUG_SCALE = 0.3;
-
 // lots of useful distributions!
 class Random {
     constructor(fn) {
@@ -167,6 +165,122 @@ function bvToRgb(bv) {
     return [r, g, b];
 }
 
+// matrices
+class Matrix {
+    constructor(data) {
+        // column-major, just like opengl likes
+        if (!data)
+            data = Matrix.identity().data;
+        if (data.length != 16)
+            throw "bad matrix data";
+        this.data = data;
+    }
+
+    get(r, c) {
+        return this.data[4 * c + r];
+    }
+
+    dot(other) {
+        if (other.length && other.length == 4) {
+            var result = [0, 0, 0, 0];
+            for (var r = 0; r < 4; r++) {
+                for (var i = 0; i < 4; i++) {
+                    result[r] += this.data[4 * i + r] * other[i];
+                }
+            }
+            return result;
+        }
+
+        var result = new Array(16);
+        for (var r = 0; r < 4; r++) {
+            for (var c = 0; c < 4; c++) {
+                result[4 * c + r] = 0.0;
+                for (var i = 0; i < 4; i++) {
+                    result[4 * c + r] +=
+                        this.data[4 * i + r] * other.data[4 * c + i];
+                }
+            }
+        }
+        return new Matrix(result);
+    }
+
+    transpose() {
+        var d = this.data;
+        return new Matrix([
+            d[0], d[4], d[8], d[12],
+            d[1], d[5], d[9], d[13],
+            d[2], d[6], d[10], d[14],
+            d[3], d[7], d[11], d[15],
+        ]);
+    }
+
+    static identity() {
+        return new Matrix([
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ]);
+    }
+
+    translate(x, y, z) {
+        return new Matrix([
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            x, y, z, 1,
+        ]).dot(this);
+    }
+
+    scale(x, y, z) {
+        if (!y)
+            y = x;
+        if (!z)
+            z = x;
+        return new Matrix([
+            x, 0, 0, 0,
+            0, y, 0, 0,
+            0, 0, z, 0,
+            0, 0, 0, 1,
+        ]).dot(this);
+    }
+
+    rotate(x, y, z, theta) {
+        var mag = Math.sqrt(x * x + y * y + z * z);
+        x /= mag;
+        y /= mag;
+        z /= mag;
+        if (!theta)
+            theta = mag;
+        var sin = Math.sin(theta);
+        var cos = Math.cos(theta)
+        var icos = 1.0 - cos;
+        return new Matrix([
+            cos + x * x * icos, x * y * icos - z * sin, x * z * icos + y * sin, 0,
+            y * x * icos + z * sin, cos + y * y * icos, y * z * icos - x * sin, 0,
+            z * x * icos - y * sin, z * y * icos + x * sin, cos + z * z * icos, 0,
+            0, 0, 0, 1,
+        ]).dot(this);
+    }
+
+    perspectiveV(width, height, near, far) {
+        return new Matrix([
+            2 * near / width, 0, 0, 0,
+            0, 2 * near / height, 0, 0,
+            0, 0, -(far + near) / (far - near), -1,
+            0, 0, -2 * far * near / (far - near), 0,
+        ]).dot(this);
+    }
+
+    perspective(aspect, fov, near, far) {
+        var diag = 2.0 * near * Math.tan(fov / 2.0);
+        var diagf = Math.sqrt(1.0 + aspect * aspect);
+        var width = diag * aspect / diagf;
+        var height = diag / diagf;
+        return this.perspectiveV(width, height, near, far);
+    }
+}
+
 // helper for making shaders
 class Shader {
     constructor(ctx, vertlines, fraglines, transformRecord) {
@@ -228,8 +342,9 @@ class Shader {
 }
 
 class View {
-    constructor(container) {
-        this.container = container;
+    constructor(root) {
+        this.root = root;
+        this.container = root.container;
         this.properties = {};
     }
     updateSizes(width, height) {
@@ -241,20 +356,20 @@ class View {
     }
     start() {}
     stop() {}
-    draw(ctx, t, dt, debug) {}
+    draw(ctx, t, dt) {}
 }
 
 class ElementView extends View {
-    constructor(container, name) {
-        super(container);
+    constructor(root, name) {
+        super(root);
         this.el = document.createElement(name);
-        container.appendChild(this.el);
+        root.container.appendChild(this.el);
     }
 }
 
 class Canvas extends ElementView {
-    constructor(container) {
-        super(container, 'canvas');
+    constructor(root) {
+        super(root, 'canvas');
 
         this.el.style.zIndex = -1;
         this.el.style.position = 'absolute';
@@ -262,9 +377,7 @@ class Canvas extends ElementView {
         this.el.style.top = '0px';
         this.background = [0.0, 0.0, 0.0];
         this.light = [1.0, 1.0, 1.0];
-        this.debug = false;
 
-        this.properties['debug'] = v => this.debug = v;
         this.properties['background'] = v => {
             this.background = v;
             this.updateUniforms();
@@ -295,18 +408,18 @@ class Canvas extends ElementView {
         var quadv = ctx.createBuffer();
         ctx.bindBuffer(ctx.ARRAY_BUFFER, quadv);
         ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([
-            1.0, 1.0, 0.0,
-            1.0, -1.0, 0.0,
-            -1.0, -1.0, 0.0,
-            -1.0, 1.0, 0.0
+            1.0, 1.0,
+            1.0, -1.0,
+            -1.0, -1.0,
+            -1.0, 1.0
         ]), ctx.STATIC_DRAW);
 
         this.shader = new Shader(ctx, [
-            'attribute vec3 pos;',
+            'attribute vec2 pos;',
             'varying float f;',
-            'uniform float debugscale;',
+            'uniform mat4 viewMatrix;',
             'void main(void) {',
-            '  gl_Position = vec4(pos * debugscale, 1.0);',
+            '  gl_Position = viewMatrix * vec4(pos, 0.0, 1.0);',
             '  f = (pos.y + 1.0) * 0.5;',
             '}'
         ], [
@@ -320,7 +433,7 @@ class Canvas extends ElementView {
             '}'
         ]);
 
-        ctx.vertexAttribPointer(this.shader.pos, 3, ctx.FLOAT, false, 0, 0);
+        ctx.vertexAttribPointer(this.shader.pos, 2, ctx.FLOAT, false, 0, 0);
         ctx.enableVertexAttribArray(this.shader.pos);
         ctx.bindVertexArray(null);
 
@@ -332,22 +445,23 @@ class Canvas extends ElementView {
             this.shader.use(this.ctx);
             this.ctx.uniform3fv(this.shader.background, this.background);
             this.ctx.uniform3fv(this.shader.light, this.light);
+            this.ctx.uniformMatrix4fv(this.shader.viewMatrix, false,
+                                      this.root.viewMatrices.normalized.data);
         }
     }
 
-    draw(ctx, t, dt, debug) {
+    draw(ctx, t, dt) {
         // clear with gradient
         ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
-        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         ctx.blendFunc(ctx.ONE, ctx.ZERO);
         ctx.drawArrays(ctx.TRIANGLE_FAN, 0, 4);
     }
 }
 
 class Starfield extends View {
-    constructor(container) {
-        super(container);
+    constructor(root) {
+        super(root);
 
         this.generateStars = false;
         this.starDistance = 20;
@@ -358,10 +472,6 @@ class Starfield extends View {
         this.magnitudes = Random.exponential(1.2).map(v => 6.0 - v);
         this.colors = Random.normal(0.8, 0.4);
         this.shimmerAmount = Random.unit();
-        this.omega = 0.02; // radians / second
-        this.fov = 90 * Math.PI / 180;
-        this.horizon = 200; // in pixels, from bottom
-        this.north = 0.8; // proportional to width, from left
         this.shimmerRate = 10.0; // units of 1/s, leak rate
 
         this.galaxyAngle = 63 * Math.PI / 180;
@@ -417,7 +527,7 @@ class Starfield extends View {
 
         // figure out how many stars we need to get this distance
         var numStars = width * height / Math.pow(this.starDistance, 2);
-        numStars *= 4.0 * Math.PI / this.fov;
+        numStars *= 4.0 * Math.PI / this.root.viewMatrices.fov;
         numStars /= (1.0 - this.galaxyProportion);
         if (numStars > this.maxStars)
             numStars = this.maxStars;
@@ -463,13 +573,9 @@ class Starfield extends View {
             'attribute float size;',
             'attribute float shimmerAmount;',
             'attribute float shimmer;',
-            'uniform vec2 theta;',
-            'uniform vec2 rotyz;',
-            'uniform vec2 rotxz;',
-            'uniform vec2 fov;',
+            'uniform mat4 viewMatrix;',
             'uniform float dt;',
             'uniform float shimmerRate;',
-            'uniform float debugscale;',
             'varying vec3 pointColor;',
             'varying float shimmerOut;',
             // https://gist.github.com/patriciogonzalezvivo/670c22f3966e662d2f83
@@ -477,27 +583,10 @@ class Starfield extends View {
             '  return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);',
             '}',
             'void main(void) {',
-            '  vec3 p_t;',
-            '  p_t.x = theta.x * pos.x - theta.y * pos.y;',
-            '  p_t.y = theta.y * pos.x + theta.x * pos.y;',
-            '  p_t.z = pos.z;',
-            '  vec3 p_yz;',
-            '  p_yz.x = p_t.x;',
-            '  p_yz.y = rotyz.y * p_t.z + rotyz.x * p_t.y;',
-            '  p_yz.z = rotyz.x * p_t.z - rotyz.y * p_t.y;',
-            '  vec3 p_xz;',
-            '  p_xz.x = rotxz.y * p_yz.z + rotxz.x * p_yz.x;',
-            '  p_xz.y = p_yz.y;',
-            '  p_xz.z = rotxz.x * p_yz.z - rotxz.y * p_yz.x;',
-            '  vec4 p = vec4(p_xz.xyz, 1.0);',
+            '  vec4 p = viewMatrix * vec4(pos, 1.0);',
             '  shimmerOut = shimmer;',
             '  shimmerOut -= dt * shimmerRate *',
             '    (shimmer - 2.0 * rand(vec2(p.x, p.y)) + 1.0);',
-            '  p.xy /= p.z;',
-            '  p.x /= fov.x;',
-            '  p.y /= fov.y;',
-            '  p.z -= 1.0;',
-            '  p.xy *= debugscale;',
             '  pointColor = color;',
             '  pointColor *= 1.0 - 0.5 * (shimmer + 1.0) * shimmerAmount;',
             '  gl_Position = p;',
@@ -579,31 +668,19 @@ class Starfield extends View {
     updateUniforms() {
         if (this.shader) {
             this.shader.use(this.ctx);
-            var ld = Math.tan(this.fov / 2.0);
-            var lx = ld * this.width / this.diagonal;
-            var ly = ld * this.height / this.diagonal;
-            this.ctx.uniform2f(this.shader.fov, lx, ly);
+
             this.ctx.uniform1f(this.shader.shimmerRate, this.shimmerRate);
-            var horizont = Math.atan(ly * (2.0 * this.horizon / this.height - 1.0));
-            this.ctx.uniform2f(this.shader.rotyz,
-                               Math.cos(horizont), Math.sin(horizont));
-            var northt = Math.atan(lx * (2.0 * this.north - 1.0));
-            this.ctx.uniform2f(this.shader.rotxz,
-                               Math.cos(northt), Math.sin(northt));
         }
     }
 
     draw(ctx, t, dt, debug) {
-        // figure out how much the stars have rotated since last frame
-        var theta = t * this.omega;
-        var thetasin = Math.sin(theta);
-        var thetacos = Math.cos(theta);
+        this.shader.use(ctx);
+
+        this.ctx.uniformMatrix4fv(this.shader.viewMatrix,
+                                  false, this.root.viewMatrices.sky.data);
 
         // draw stars
-        this.shader.use(ctx);
-        ctx.uniform2f(this.shader.theta, thetacos, thetasin);
         ctx.uniform1f(this.shader.dt, dt);
-        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
 
         ctx.bindVertexArray(this.array);
@@ -627,8 +704,8 @@ class Starfield extends View {
 }
 
 class Comets extends View {
-    constructor(container) {
-        super(container);
+    constructor(root) {
+        super(root);
         this.comets = [];
 
         this.cometColor = [1.0, 1.0, 1.0];
@@ -673,26 +750,17 @@ class Comets extends View {
             'attribute vec2 pos;',
             'attribute float tail;',
             'varying vec4 c;',
-            'uniform float debugscale;',
-            'uniform vec2 viewport;',
-            'uniform vec2 cometPos;',
+            'uniform mat4 viewMatrix;',
+            'uniform mat4 cometMatrix;',
             'uniform float radius;',
-            'uniform vec2 theta;',
             'uniform float tailSize;',
             'uniform vec3 color;',
             'uniform vec3 tailColor;',
             'void main(void) {',
-            '  vec2 p;',
-            '  p.x = theta.x * pos.x - theta.y * pos.y;',
-            '  p.y = theta.y * pos.x + theta.x * pos.y;',
+            '  vec2 p = pos;',
             '  p *= tail * tailSize + (1.0 - tail) * radius;',
-            '  p += cometPos;',
-            '  p.x /= viewport.x;',
-            '  p.y /= viewport.y;',
-            '  p = 2.0 * p - vec2(1.0, 1.0);',
-            '  p.y *= -1.0;',
             '  c = vec4(tail * tailColor + (1.0 - tail) * color, 1.0);',
-            '  gl_Position = vec4(p * debugscale, 0.0, 1.0);',
+            '  gl_Position = viewMatrix * cometMatrix * vec4(p, 0.0, 1.0);',
             '}'
         ], [
             'precision mediump float;',
@@ -716,11 +784,12 @@ class Comets extends View {
     updateUniforms() {
         if (this.shader) {
             this.shader.use(this.ctx);
-            this.ctx.uniform2f(this.shader.viewport, this.width, this.height);
+            this.ctx.uniformMatrix4fv(this.shader.viewMatrix, false,
+                                      this.root.viewMatrices.viewport.data);
         }
     }
 
-    draw(ctx, t, dt, debug) {
+    draw(ctx, t, dt) {
         // generate any comets we need
         var numComets = Random.poisson(this.cometRate * dt).generate();
         for (var i = 0; i < numComets; i++) {
@@ -749,9 +818,7 @@ class Comets extends View {
                 radius: radius,
                 vx: vx,
                 vy: vy,
-                v: v,
-                sint: sint,
-                cost: cost,
+                matrix: new Matrix().rotate(0, 0, -vt),
                 color: this.cometColor,
                 tailColor: this.tailColor,
                 tailSize: v * this.tailSize
@@ -772,13 +839,12 @@ class Comets extends View {
         ctx.bindVertexArray(this.array);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
         this.shader.use(ctx);
-        ctx.uniform1f(this.shader.debugscale, debug ? DEBUG_SCALE : 1.0);
         for (var i = 0; i < this.comets.length; i++) {
             var c = this.comets[i];
 
-            ctx.uniform2f(this.shader.cometPos, c.x, c.y);
+            ctx.uniformMatrix4fv(this.shader.cometMatrix, false,
+                                 c.matrix.translate(c.x, c.y, 0.0).data);
             ctx.uniform1f(this.shader.radius, c.radius);
-            ctx.uniform2f(this.shader.theta, c.cost, c.sint);
             ctx.uniform3fv(this.shader.color, c.color);
             ctx.uniform3fv(this.shader.tailColor, c.tailColor);
             ctx.uniform1f(this.shader.tailSize, c.tailSize);
@@ -793,8 +859,8 @@ class Comets extends View {
 }
 
 class Foreground extends ElementView {
-    constructor(container) {
-        super(container, 'img');
+    constructor(root) {
+        super(root, 'img');
         this.el.style.position = 'absolute';
         this.el.style.left = '0px';
         this.el.style.right = '0px';
@@ -806,8 +872,8 @@ class Foreground extends ElementView {
 }
 
 class Character extends ElementView {
-    constructor(container) {
-        super(container, 'img');
+    constructor(root) {
+        super(root, 'img');
 
         this.el.style.position = 'absolute';
         this.bottom = 0;
@@ -828,8 +894,8 @@ class Character extends ElementView {
 }
 
 class Byline extends ElementView {
-    constructor(container) {
-        super(container, 'span');
+    constructor(root) {
+        super(root, 'span');
 
         this.el.style.position = 'absolute';
         this.el.style.right = '0px';
@@ -847,8 +913,8 @@ class Byline extends ElementView {
 }
 
 class Music extends View {
-    constructor(container) {
-        super(container);
+    constructor(root) {
+        super(root);
 
         this.music = new Audio();
         this.music.loop = true;
@@ -871,24 +937,75 @@ class Music extends View {
     }
 }
 
+class ViewMatrices extends View {
+    constructor(root) {
+        super(root);
+
+        this.omega = 0.02; // radians / second
+        this.fov = 90 * Math.PI / 180;
+        this.horizon = 200; // in pixels, from bottom
+        this.north = 0.8; // proportional to width, from left
+
+        this.debug = false;
+        this.properties['debug'] = v => {
+            this.debug = v;
+            this.updateSizes(this.width, this.height);
+        }
+
+        this.skyBase = null;
+        this.sky = null;
+    }
+
+    updateSizes(width, height) {
+        super.updateSizes(width, height);
+
+        var debugscale = this.debug ? 0.3 : 1.0;
+
+        // re-orient view
+        var diagonal = Math.sqrt(width * width + height * height);
+        var ld = Math.tan(this.fov / 2.0);
+        var lx = ld * width / diagonal;
+        var ly = ld * height / diagonal;
+        
+        var horizont = Math.atan(ly * (2.0 * this.horizon / this.height - 1.0))
+        var northt = Math.atan(lx * (2.0 * this.north - 1.0));
+        this.skyBase = new Matrix().rotate(0, Math.PI, 0)
+            .rotate(-horizont, 0, 0).rotate(0, northt, 0)
+            .perspective(this.width / this.height, this.fov, 0.1, 2.0)
+            .scale(debugscale, debugscale, 1.0);
+
+        this.viewport = new Matrix().scale(2.0 / width, 2.0 / height, 1.0)
+            .translate(-1.0, -1.0, 0.0)
+            .scale(debugscale, -debugscale, 1.0);
+
+        this.normalized = new Matrix().scale(debugscale, debugscale, 1.0);
+    }
+
+    draw(ctx, t, dt, debug) {
+        var theta = t * this.omega;
+        this.sky = this.skyBase.dot(new Matrix().rotate(0.0, 0.0, theta));
+    }
+}
+
 class SpaceCowboy {
     constructor(container) {
         this.container = container;
         this.running = false;
 
         // set up our canvas
-        this.canvas = new Canvas(container);
-
-        this.starfield = new Starfield(container);
+        this.canvas = new Canvas(this);
+        this.starfield = new Starfield(this);
+        this.viewMatrices = new ViewMatrices(this);
         
         this.views = [
+            this.viewMatrices,
             this.canvas,
             this.starfield,
-            new Comets(container),
-            new Foreground(container),
-            new Character(container),
-            new Byline(container),
-            new Music(container),
+            new Comets(this),
+            new Foreground(this),
+            new Character(this),
+            new Byline(this),
+            new Music(this),
         ];
         
         // default
@@ -945,18 +1062,10 @@ class SpaceCowboy {
             dt = (t - this.lastFrame) / 1000.0;
 
         var ctx = this.canvas.ctx;
-        var debug = this.canvas.debug;
 
         // draw all
         for (var i = 0; i < this.views.length; i++)
-            this.views[i].draw(ctx, ts, dt, debug);
-
-        // debug frame
-        if (debug) {
-            //ctx.strokeStyle = 'red';
-            //ctx.lineWidth = 5;
-            //ctx.strokeRect(0, 0, this.width, this.height);
-        }
+            this.views[i].draw(ctx, ts, dt);
 
         // reschedule
         this.lastFrame = t;
