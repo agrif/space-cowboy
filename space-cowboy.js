@@ -404,6 +404,7 @@ class Light extends View {
 
         this.background = [0.0, 0.0, 0.0];
         this.light = [1.0, 1.0, 1.0];
+        this.quant = 255.0;
 
         this.properties['background'] = v => {
             this.background = v;
@@ -411,6 +412,10 @@ class Light extends View {
         };
         this.properties['light'] = v => {
             this.light = v;
+            this.updateUniforms();
+        };
+        this.properties['quant'] = v => {
+            this.quant = v;
             this.updateUniforms();
         };
     }
@@ -443,9 +448,32 @@ class Light extends View {
             'varying float f;',
             'uniform vec3 background;',
             'uniform vec3 light;',
+            'uniform float t;',
+            'uniform float quanti;',
+            'float rand(vec2 n) {',
+            '  return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);',
+            '}',
+            'vec4 rand4(vec2 n) {',
+            '  return vec4(',
+            '    rand(n + 0.00),',
+            '    rand(n + 0.08),',
+            '    rand(n + 0.13),',
+            '    rand(n + 0.21)',
+            '  );',
+            '}',
+            'vec4 dither(vec2 n, vec4 c, float q) {',
+            '  float ti = fract(t);',
+            '  vec4 r = rand4(n + ti) + rand4(n + 0.22 + ti) - 1.0;',
+            '  return c + r / q;',
+            '}',
+            'vec4 quant(vec4 c, float q) {',
+            '  vec4 scaled = dither(gl_FragCoord.xy, c, q) * q + vec4(0.5);',
+            '  vec4 i = floor(scaled);',
+            '  return i / q;',
+            '}',
             'void main(void) {',
             '  vec3 c = background * f + light * (1.0 - f);',
-            '  gl_FragColor = vec4(c, 1.0);',
+            '  gl_FragColor = quant(vec4(c, 1.0), quanti);',
             '}'
         ]);
 
@@ -461,6 +489,7 @@ class Light extends View {
             this.shader.use(this.ctx);
             this.ctx.uniform3fv(this.shader.background, this.background);
             this.ctx.uniform3fv(this.shader.light, this.light);
+            this.ctx.uniform1f(this.shader.quanti, this.quant);
             this.ctx.uniformMatrix4fv(this.shader.viewMatrix, false,
                                       this.root.viewMatrices.normalized.data);
         }
@@ -470,6 +499,7 @@ class Light extends View {
         // draw light gradient
         ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
+        this.ctx.uniform1f(this.shader.t, t);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
         ctx.drawArrays(ctx.TRIANGLE_FAN, 0, 4);
     }
@@ -1334,6 +1364,8 @@ class SpaceCowboy {
             return this.blue();
         if (name === 'standby')
             return this.standby();
+        if (name === 'grain')
+            return this.grain();
         if (name === 'ttgl')
             return this.ttgl();
         if (name === 'exhale')
@@ -1377,6 +1409,12 @@ class SpaceCowboy {
         return this.set({
             byline: 'PLEASE STAND BY.',
             music: null,
+        });
+    }
+
+    grain() {
+        return this.set({
+            quant: 15.0,
         });
     }
 
