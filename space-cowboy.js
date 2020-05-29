@@ -917,6 +917,7 @@ class Planet extends View {
         this.lightdir = [2.0, 0.0, -4.0];
         this.roughness = 0.5;
         this.textureUrl = 'moon.jpg';
+        this.enable = false;
 
         this.properties['moonSize'] = v => {
             this.fudge = v;
@@ -925,6 +926,11 @@ class Planet extends View {
 
         this.properties['moonTexture'] = v => {
             this.textureUrl = v;
+            this.loadTexture();
+        };
+
+        this.properties['planet'] = v => {
+            this.enable = v;
             this.loadTexture();
         };
 
@@ -1060,7 +1066,7 @@ class Planet extends View {
     }
 
     loadTexture() {
-        if (this.ctx) {
+        if (this.ctx && this.enable) {
             var ctx = this.ctx;
             var tex = this.tex;
             var image = new Image();
@@ -1102,6 +1108,8 @@ class Planet extends View {
     }
 
     draw(ctx, t, dt) {
+        if (!this.enable)
+            return;
         ctx.bindVertexArray(this.sphere);
         this.shader.use(ctx);
         ctx.activeTexture(ctx.TEXTURE0);
@@ -1366,6 +1374,8 @@ class SpaceCowboy {
             return this.standby();
         if (name === 'grain')
             return this.grain();
+        if (name === 'planet')
+            return this.planet();
         if (name === 'ttgl')
             return this.ttgl();
         if (name === 'exhale')
@@ -1415,6 +1425,12 @@ class SpaceCowboy {
     grain() {
         return this.set({
             quant: 15.0,
+        });
+    }
+
+    planet() {
+        return this.set({
+            planet: true,
         });
     }
 
