@@ -405,6 +405,8 @@ class Light extends View {
         this.background = [0.0, 0.0, 0.0];
         this.light = [1.0, 1.0, 1.0];
         this.quant = 255.0;
+        this.ditherUrl = null;
+        this.ditherSize = [1, 1];
 
         this.properties['background'] = v => {
             this.background = v;
@@ -418,6 +420,10 @@ class Light extends View {
             this.quant = v;
             this.updateUniforms();
         };
+        this.properties['dither'] = v => {
+            this.ditherUrl = v;
+            this.loadTexture();
+        }
     }
 
     updateContext(ctx) {
@@ -435,6 +441,16 @@ class Light extends View {
             -1.0, 1.0
         ]), ctx.STATIC_DRAW);
 
+        this.tex = ctx.createTexture();
+        ctx.bindTexture(ctx.TEXTURE_2D, this.tex);
+        // placeholder
+        ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, 1, 1, 0,
+                       ctx.RGBA, ctx.UNSIGNED_BYTE,
+                       new Uint8Array([255, 255, 255, 255]));
+        ctx.bindTexture(ctx.TEXTURE_2D, null);
+
+        this.loadTexture();
+
         this.shader = new Shader(ctx, [
             'attribute vec2 pos;',
             'varying float f;',
@@ -446,6 +462,9 @@ class Light extends View {
         ], [
             'precision mediump float;',
             'varying float f;',
+            'uniform bool usedither;',
+            'uniform sampler2D dithertex;',
+            'uniform vec2 dithersize;',
             'uniform vec3 background;',
             'uniform vec3 light;',
             'uniform float t;',
@@ -463,7 +482,12 @@ class Light extends View {
             '}',
             'vec4 dither(vec2 n, vec4 c, float q) {',
             '  float ti = fract(t);',
-            '  vec4 r = rand4(n + ti) + rand4(n + 0.22 + ti) - 1.0;',
+            '  vec4 r;',
+            '  if (usedither) {',
+            '    r = texture2D(dithertex, n / dithersize) * 2.0 - 1.0;',
+            '  } else {',
+            '    r = rand4(n + ti) + rand4(n + 0.22 + ti) - 1.0;',
+            '  }',
             '  return c + r / q;',
             '}',
             'vec4 quant(vec4 c, float q) {',
@@ -484,9 +508,32 @@ class Light extends View {
         this.updateUniforms();
     }
 
+    loadTexture() {
+        if (this.ctx && this.ditherUrl) {
+            var ctx = this.ctx;
+            var tex = this.tex;
+            var image = new Image();
+            var self = this;
+            image.onload = function() {
+                ctx.bindTexture(ctx.TEXTURE_2D, tex);
+                ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA,
+                               ctx.RGBA, ctx.UNSIGNED_BYTE, image);
+                ctx.generateMipmap(ctx.TEXTURE_2D);
+                ctx.bindTexture(ctx.TEXTURE_2D, null);
+                self.ditherSize = [image.width, image.height];
+                self.updateUniforms();
+            };
+
+            image.src = this.ditherUrl;
+        }
+    }
+
     updateUniforms() {
         if (this.shader) {
             this.shader.use(this.ctx);
+            this.ctx.uniform1i(this.shader.usedither, this.ditherUrl !== null);
+            this.ctx.uniform2fv(this.shader.dithersize, this.ditherSize);
+            this.ctx.uniform1i(this.shader.dithertex, 0);
             this.ctx.uniform3fv(this.shader.background, this.background);
             this.ctx.uniform3fv(this.shader.light, this.light);
             this.ctx.uniform1f(this.shader.quanti, this.quant);
@@ -499,6 +546,8 @@ class Light extends View {
         // draw light gradient
         ctx.bindVertexArray(this.quad);
         this.shader.use(ctx);
+        ctx.activeTexture(ctx.TEXTURE0);
+        ctx.bindTexture(ctx.TEXTURE_2D, this.tex);
         this.ctx.uniform1f(this.shader.t, t);
         ctx.blendFunc(ctx.ONE, ctx.ONE);
         ctx.drawArrays(ctx.TRIANGLE_FAN, 0, 4);
@@ -1399,6 +1448,18 @@ class SpaceCowboy {
             return this.standby();
         if (name === 'grain')
             return this.grain();
+        if (name === 'quant4')
+            return this.quant(4);
+        if (name === 'quant8')
+            return this.quant(8);
+        if (name === 'quant16')
+            return this.quant(16);
+        if (name === 'quant32')
+            return this.quant(32);
+        if (name === 'clouds')
+            return this.clouds();
+        if (name === 'bayer')
+            return this.bayer();
         if (name === 'planet')
             return this.planet();
         if (name === 'ttgl')
@@ -1418,6 +1479,7 @@ class SpaceCowboy {
             background: [0.125, 0.125, 0.125],
             light: [0.1875, 0.125, 0.0],
             foreground: 'foreground.svg',
+            dither: 'noise.png',
         });
     }
 
@@ -1464,6 +1526,25 @@ class SpaceCowboy {
     grain() {
         return this.set({
             quant: 15.0,
+            dither: null,
+        });
+    }
+
+    quant(q) {
+        return this.set({
+            quant: q - 1,
+        });
+    }
+
+    clouds() {
+        return this.set({
+            dither: 'clouds.png',
+        });
+    }
+
+    bayer() {
+        return this.set({
+            dither: 'bayer.png',
         });
     }
 
