@@ -1448,6 +1448,8 @@ class SpaceCowboy {
             return this.standby();
         if (name === 'grain')
             return this.grain();
+        if (name === 'quant2')
+            return this.quant(2);
         if (name === 'quant4')
             return this.quant(4);
         if (name === 'quant8')
