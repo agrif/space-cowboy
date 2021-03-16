@@ -1407,6 +1407,8 @@ class SpaceCowboy {
             return this.exhale();
         if (name === 'cowboy')
             return this.cowboy();
+        if (name === 'viking')
+            return this.viking();
         return this;
     }
 
@@ -1431,9 +1433,9 @@ class SpaceCowboy {
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
-            hatLeft: 0.053,
-            hatWidth: 0.04,
-            hatBottom: 0.245,
+            hatLeft: 0.048,
+            hatWidth: 0.05,
+            hatBottom: 0.248,
         });
     }
 
@@ -1501,8 +1503,8 @@ class SpaceCowboy {
             characterBottom: 0.085,
             background: [0.184, 0.141, 0.262],
             light: [0.969, 0.719, 0.668],
-            hatLeft: 0.332,
-            hatWidth: 0.06,
+            hatLeft: 0.327,
+            hatWidth: 0.07,
             hatBottom: 0.15,
         });
     }
@@ -1510,6 +1512,12 @@ class SpaceCowboy {
     cowboy() {
         return this.set({
             hat: 'cowboy.svg',
+        });
+    }
+
+    viking() {
+        return this.set({
+            hat: 'viking.svg',
         });
     }
 }
