@@ -492,12 +492,15 @@ class Light extends View {
             '}',
             'vec4 quant(vec4 c, float q) {',
             '  vec4 scaled = dither(gl_FragCoord.xy, c, q) * q + vec4(0.5);',
-            '  vec4 i = floor(scaled);',
+            '  vec4 i = clamp(floor(scaled), 0.0, q);',
             '  return i / q;',
             '}',
             'void main(void) {',
-            '  vec3 c = background * f + light * (1.0 - f);',
-            '  gl_FragColor = quant(vec4(c, 1.0), quanti);',
+            //'  float factor = f;',
+            '  vec4 factor = quant(vec4(f, 1.0, 1.0, 1.0), quanti);',
+            '  vec3 c = background * factor.r + light * (1.0 - factor.r);',
+            //'  gl_FragColor = quant(vec4(c, 1.0), quanti);',
+            '  gl_FragColor = vec4(c, 1.0);',
             '}'
         ]);
 
