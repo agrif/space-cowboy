@@ -1160,6 +1160,28 @@ class Character extends ElementView {
     }
 }
 
+class Hat extends ElementView {
+    constructor(root) {
+        super(root, 'img');
+
+        this.el.style.position = 'absolute';
+        this.bottom = 0;
+
+        this.properties['hat'] = v => this.el.src = v;
+        this.properties['hatLeft'] = l => this.el.style.left = `${l * 100}%`;
+        this.properties['hatWidth'] = w => this.el.style.width = `${w * 100}%`;
+        this.properties['hatBottom'] = b => {
+            this.bottom = b;
+            this.updateSizes(this.width, this.height);
+        }
+    }
+
+    updateSizes(width, height) {
+        super.updateSizes(width, height);
+        this.el.style.bottom = `${this.bottom * this.width}px`;
+    }
+}
+
 class Byline extends ElementView {
     constructor(root) {
         super(root, 'span');
@@ -1276,6 +1298,7 @@ class SpaceCowboy {
             // stuff not in space
             new Light(this),
             new Foreground(this),
+            new Hat(this),
             new Character(this),
             new Byline(this),
             new Music(this),
@@ -1370,6 +1393,8 @@ class SpaceCowboy {
             return this.bebop();
         if (name === 'blue')
             return this.blue();
+        if (name === 'riseup')
+            return this.riseup();
         if (name === 'standby')
             return this.standby();
         if (name === 'grain')
@@ -1380,6 +1405,8 @@ class SpaceCowboy {
             return this.ttgl();
         if (name === 'exhale')
             return this.exhale();
+        if (name === 'cowboy')
+            return this.cowboy();
         return this;
     }
 
@@ -1404,6 +1431,9 @@ class SpaceCowboy {
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
+            hatLeft: 0.053,
+            hatWidth: 0.04,
+            hatBottom: 0.245,
         });
     }
 
@@ -1412,6 +1442,13 @@ class SpaceCowboy {
             byline: 'YOU\'RE GONNA CARRY THAT WEIGHT.',
             music: 'blue.mp3',
             light: [0.0, 0.0, 0.3125],
+        });
+    }
+
+    riseup() {
+        return this.bebop().cowboy().set({
+            byline: 'RISE UP, DEAD MAN.',
+            music: 'riseup.mp3',
         });
     }
 
@@ -1444,6 +1481,9 @@ class SpaceCowboy {
             characterLeft: 0.025,
             characterWidth: 0.10,
             characterBottom: 0.12,
+            hatLeft: 0.056,
+            hatWidth: 0.04,
+            hatBottom: 0.22,
         });
     }
 
@@ -1461,6 +1501,15 @@ class SpaceCowboy {
             characterBottom: 0.085,
             background: [0.184, 0.141, 0.262],
             light: [0.969, 0.719, 0.668],
+            hatLeft: 0.332,
+            hatWidth: 0.06,
+            hatBottom: 0.15,
+        });
+    }
+
+    cowboy() {
+        return this.set({
+            hat: 'cowboy.svg',
         });
     }
 }
