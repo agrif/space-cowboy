@@ -1449,6 +1449,16 @@ class SpaceCowboy {
             return this.riseup();
         if (name === 'standby')
             return this.standby();
+        if (name === 'no-char')
+            return this.no_char();
+        if (name === 'no-fg')
+            return this.no_fg();
+        if (name === 'no-text')
+            return this.no_text();
+        if (name === 'no-music')
+            return this.no_music();
+        if (name === 'blank')
+            return this.blank();
         if (name === 'grain')
             return this.grain();
         if (name === 'quant2')
@@ -1467,6 +1477,10 @@ class SpaceCowboy {
             return this.bayer();
         if (name === 'planet')
             return this.planet();
+        if (name === 'moon')
+            return this.moon();
+        if (name === 'jupiter')
+            return this.jupiter();
         if (name === 'ttgl')
             return this.ttgl();
         if (name === 'exhale')
@@ -1489,14 +1503,13 @@ class SpaceCowboy {
     }
 
     bebop() {
-        return this.defaults().set({
+        return this.defaults().jupiter().set({
             byline: 'SEE YOU SPACE COWBOY...',
             bylineFontFamily: 'Bookman, serif',
             bylineFontStyle: 'italic',
             music: 'space-lion.mp3',
+            planet: false,
             character: 'spike.svg',
-            moonSize: 50,
-            moonTexture: 'jupiter.jpg',
             characterLeft: 0.05,
             characterWidth: 0.05,
             characterBottom: 0.12,
@@ -1526,6 +1539,34 @@ class SpaceCowboy {
             byline: 'PLEASE STAND BY.',
             music: null,
         });
+    }
+
+    no_char() {
+        return this.set({
+            character: 'transparent.png',
+        });
+    }
+
+    no_fg() {
+        return this.no_char().set({
+            foreground: 'transparent.png',
+        });
+    }
+
+    no_text() {
+        return this.set({
+            byline: '',
+        });
+    }
+
+    no_music() {
+        return this.set({
+            music: null,
+        });
+    }
+
+    blank() {
+        return this.no_char().no_fg().no_text().no_music();
     }
 
     grain() {
@@ -1559,13 +1600,26 @@ class SpaceCowboy {
         });
     }
 
+    jupiter() {
+        return this.planet().set({
+            moonSize: 50,
+            moonTexture: 'jupiter.jpg',
+        });
+    }
+
+    moon() {
+        return this.planet().set({
+            moonSize: 5,
+            moonTexture: 'moon.jpg',
+        });
+    }
+
     ttgl() {
-        return this.bebop().set({
+        return this.bebop().moon().set({
             byline: 'HMM...',
             music: 'libera-me-from-hell.mp3',
             character: 'kamina.svg',
-            moonSize: 5,
-            moonTexture: 'moon.jpg',
+            planet: false,
             characterLeft: 0.025,
             characterWidth: 0.10,
             characterBottom: 0.12,
@@ -1576,14 +1630,13 @@ class SpaceCowboy {
     }
 
     exhale() {
-        return this.defaults().set({
+        return this.defaults().moon().set({
             byline: 'Just breathe.',
             bylineFontFamily: 'Renogare, sans-serif',
             bylineFontStyle: 'normal',
             music: 'exhale.mp3',
             character: 'madeline.svg',
-            moonSize: 5,
-            moonTexture: 'moon.jpg',
+            planet: false,
             characterLeft: 0.31,
             characterWidth: 0.10,
             characterBottom: 0.085,
